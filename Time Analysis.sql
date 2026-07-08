@@ -1,65 +1,118 @@
---CleanAgent code with uniqueIP firstseen last seen active minutes recordes perminutes 
-SELECT
-    CleanAdminComment,
-    COUNT(*) AS RecordsCount,
-    COUNT(DISTINCT IPAddress) AS UniqueIPs,
-    MIN(TRY_CONVERT(datetime2, CreatedOnUtc)) AS FirstSeen,
-    MAX(TRY_CONVERT(datetime2, CreatedOnUtc)) AS LastSeen,
-    DATEDIFF(
-        MINUTE,
-        MIN(TRY_CONVERT(datetime2, CreatedOnUtc)),
-        MAX(TRY_CONVERT(datetime2, CreatedOnUtc))
-    ) AS ActiveMinutes,
-    COUNT(*) * 1.0 / NULLIF(
-        DATEDIFF(
+-- Time Analysis / Burst Evidence
+-- Runs across all CleanAdminComment values and returns one decision per value.
+
+DECLARE @WindowMinutes INT = 5;
+
+WITH Base AS (
+    SELECT
+        CleanAdminComment,
+        TRY_CONVERT(datetime2, CreatedOnUtc) AS CreatedOnUtcDate
+    FROM Results
+    WHERE CleanAdminComment IS NOT NULL
+      AND LTRIM(RTRIM(CleanAdminComment)) <> ''
+),
+CandidateTotals AS (
+    SELECT
+        CleanAdminComment,
+        COUNT(*) AS TotalRecords,
+        SUM(
+            CASE
+                WHEN CreatedOnUtcDate IS NOT NULL THEN 1
+                ELSE 0
+            END
+        ) AS RecordsWithValidDate
+    FROM Base
+    GROUP BY CleanAdminComment
+),
+ValidDates AS (
+    SELECT
+        CleanAdminComment,
+        CreatedOnUtcDate
+    FROM Base
+    WHERE CreatedOnUtcDate IS NOT NULL
+),
+MinuteHits AS (
+    SELECT
+        CleanAdminComment,
+        DATEADD(
             MINUTE,
-            MIN(TRY_CONVERT(datetime2, CreatedOnUtc)),
-            MAX(TRY_CONVERT(datetime2, CreatedOnUtc))
-        ),
-        0
-    ) AS RecordsPerMinute
-FROM Results
-WHERE CleanAdminComment IS NOT NULL
-  AND LTRIM(RTRIM(CleanAdminComment)) <> ''
-  AND TRY_CONVERT(datetime2, CreatedOnUtc) IS NOT NULL
-GROUP BY CleanAdminComment
-ORDER BY RecordsPerMinute DESC;
-
-
-
-
-
-
---Time Line 
-
-DECLARE @UserAgent NVARCHAR(MAX);
-
-SET @UserAgent = N'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
-
+            DATEDIFF(MINUTE, 0, CreatedOnUtcDate),
+            0
+        ) AS MinuteUtc,
+        COUNT(*) AS Hits
+    FROM ValidDates
+    GROUP BY
+        CleanAdminComment,
+        DATEADD(
+            MINUTE,
+            DATEDIFF(MINUTE, 0, CreatedOnUtcDate),
+            0
+        )
+),
+PeakMinute AS (
+    SELECT
+        CleanAdminComment,
+        MinuteUtc AS PeakMinuteUtc,
+        Hits AS PeakMinuteHits,
+        ROW_NUMBER() OVER (
+            PARTITION BY CleanAdminComment
+            ORDER BY Hits DESC, MinuteUtc ASC
+        ) AS rn
+    FROM MinuteHits
+),
+LocalWindow AS (
+    SELECT
+        p.CleanAdminComment,
+        p.PeakMinuteUtc,
+        p.PeakMinuteHits,
+        m.Hits AS WindowMinuteHits
+    FROM PeakMinute p
+    JOIN MinuteHits m
+        ON m.CleanAdminComment = p.CleanAdminComment
+       AND m.MinuteUtc BETWEEN DATEADD(MINUTE, -@WindowMinutes, p.PeakMinuteUtc)
+                           AND DATEADD(MINUTE,  @WindowMinutes, p.PeakMinuteUtc)
+    WHERE p.rn = 1
+),
+MedianCalc AS (
+    SELECT DISTINCT
+        CleanAdminComment,
+        PeakMinuteUtc,
+        PeakMinuteHits,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY WindowMinuteHits)
+            OVER (PARTITION BY CleanAdminComment, PeakMinuteUtc) AS LocalMedianHits
+    FROM LocalWindow
+)
 SELECT
-    CONVERT(VARCHAR(16), TRY_CONVERT(datetime2, CreatedOnUtc), 120) AS ActivityMinute,
-    COUNT(*) AS Hits
-FROM Results
-WHERE AdminComment = @UserAgent
-  AND TRY_CONVERT(datetime2, CreatedOnUtc) IS NOT NULL
-GROUP BY
-    CONVERT(VARCHAR(16), TRY_CONVERT(datetime2, CreatedOnUtc), 120)
+    t.CleanAdminComment,
+    t.TotalRecords,
+    t.RecordsWithValidDate,
+    m.PeakMinuteUtc,
+    m.PeakMinuteHits,
+    CAST(m.LocalMedianHits AS DECIMAL(10,2)) AS LocalMedianHits,
+    CAST(
+        m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0)
+        AS DECIMAL(10,2)
+    ) AS BurstScore,
+    CASE
+        WHEN t.TotalRecords < 100 THEN 'LOW EVIDENCE'
+        WHEN t.RecordsWithValidDate = 0 THEN 'NO VALID DATES'
+        WHEN m.PeakMinuteHits >= 100
+         AND m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 20
+        THEN 'WORTH CHECKING'
+        ELSE 'LOW BURST'
+    END AS TimeEvidenceDecision
+FROM CandidateTotals t
+LEFT JOIN MedianCalc m
+    ON m.CleanAdminComment = t.CleanAdminComment
 ORDER BY
-    ActivityMinute;
-
-
-
-
-
-
-    ---IPADD Between Appears In time range 
-SELECT
-    IPAddress,
-    COUNT(*) AS Records
-FROM Results
-WHERE AdminComment = 'Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
-  AND TRY_CONVERT(datetime2, CreatedOnUtc) >= '2026-06-29 02:14:00.000'
-  AND TRY_CONVERT(datetime2, CreatedOnUtc) <  '2026-06-29 02:30:00.000'
-GROUP BY IPAddress
-ORDER BY Records DESC;
-
+    CASE
+        WHEN t.TotalRecords >= 100
+         AND m.PeakMinuteHits >= 100
+         AND m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 20
+        THEN 0
+        WHEN t.TotalRecords < 100 THEN 2
+        ELSE 1
+    END,
+    BurstScore DESC,
+    m.PeakMinuteHits DESC,
+    t.TotalRecords DESC;
