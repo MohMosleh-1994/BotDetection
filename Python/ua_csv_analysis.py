@@ -154,6 +154,28 @@ def prepare_input_rows(df: pd.DataFrame) -> pd.DataFrame:
     return working.loc[valid_user_agents].reset_index(drop=True)
 
 
+def combine_clean_admin_comments(values: pd.Series) -> str:
+    """Combine distinct CleanAdminComment values for one repeated User-Agent."""
+    unique_values: list[str] = []
+    seen_values: set[str] = set()
+
+    for value in values:
+        clean_value = normalize_text(value)
+        if clean_value and clean_value not in seen_values:
+            unique_values.append(clean_value)
+            seen_values.add(clean_value)
+
+    return " | ".join(unique_values)
+
+
+def format_record_count(value: Any) -> str:
+    """Format summed record counts without a trailing .0 when possible."""
+    numeric_value = float(value)
+    if numeric_value.is_integer():
+        return str(int(numeric_value))
+    return str(numeric_value)
+
+
 def parse_user_agent(admin_comment: str) -> dict[str, Any]:
     """Parse one User-Agent and return normalized parser fields."""
     parsed = user_agent_parser.Parse(admin_comment)
@@ -219,23 +241,32 @@ def parse_user_agent(admin_comment: str) -> dict[str, Any]:
 
 
 def build_parsed_rows(input_rows: pd.DataFrame) -> pd.DataFrame:
-    """Build the row-level parsed output data."""
+    """Build parsed output with one row per unique AdminComment/User-Agent."""
+    if input_rows.empty:
+        return pd.DataFrame(columns=[*PARSED_OUTPUT_COLUMNS, "_RecordWeight"])
+
+    unique_user_agents = (
+        input_rows.groupby("AdminComment", dropna=False, sort=False)
+        .agg(
+            CleanAdminComment=("CleanAdminComment", combine_clean_admin_comments),
+            _RecordWeight=("_RecordWeight", "sum"),
+        )
+        .reset_index()
+    )
+
     parsed_rows: list[dict[str, Any]] = []
 
-    for _, row in input_rows.iterrows():
+    for _, row in unique_user_agents.iterrows():
         parsed_fields = parse_user_agent(row["AdminComment"])
         parsed_rows.append(
             {
                 "CleanAdminComment": row["CleanAdminComment"],
                 "AdminComment": row["AdminComment"],
-                "RecordCount": row["RecordCount"],
+                "RecordCount": format_record_count(row["_RecordWeight"]),
                 "_RecordWeight": row["_RecordWeight"],
                 **parsed_fields,
             }
         )
-
-    if not parsed_rows:
-        return pd.DataFrame(columns=[*PARSED_OUTPUT_COLUMNS, "_RecordWeight"])
 
     return pd.DataFrame(parsed_rows)
 
@@ -304,7 +335,7 @@ def write_outputs(parsed_df: pd.DataFrame, summary_df: pd.DataFrame, input_path:
 
 
 def analyze_csv(input_path: Path) -> tuple[Path, Path, int]:
-    """Run the full CSV analysis and return output paths plus parsed row count."""
+    """Run the full CSV analysis and return output paths plus unique User-Agent count."""
     df = read_csv_with_fallback(input_path)
     validate_input_columns(df)
     input_rows = prepare_input_rows(df)
@@ -328,7 +359,7 @@ def main(argv: list[str]) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    print(f"Parsed rows: {parsed_count}")
+    print(f"Parsed unique User-Agents: {parsed_count}")
     print(f"Parsed output: {parsed_output}")
     print(f"Summary output: {summary_output}")
     return 0

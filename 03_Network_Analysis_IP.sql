@@ -1,10 +1,10 @@
 -- Network Analysis - IP Evidence
--- Runs across all CleanAdminComment values and detects IP concentration.
+-- Runs across all AdminComment values and detects IP concentration.
 
 WITH Base AS (
     -- Keep every record for TotalRecords; only normalize IP for IP-specific metrics.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         LTRIM(RTRIM(
             CASE
                 WHEN IPAddress IS NULL THEN NULL
@@ -14,13 +14,13 @@ WITH Base AS (
             END
         )) AS FirstIPAddress
     FROM Results
-    WHERE CleanAdminComment IS NOT NULL
-      AND LTRIM(RTRIM(CleanAdminComment)) <> ''
+    WHERE AdminComment IS NOT NULL
+      AND LTRIM(RTRIM(AdminComment)) <> ''
 ),
 Normalized AS (
     -- Exclude only invalid IP values from IP calculations.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         CASE
             WHEN FirstIPAddress IS NULL THEN NULL
             WHEN FirstIPAddress = '' THEN NULL
@@ -32,33 +32,33 @@ Normalized AS (
 CandidateTotals AS (
     -- TotalRecords counts all records, even when IPAddress is missing or invalid.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         COUNT(*) AS TotalRecords,
         COUNT(ValidIPAddress) AS RecordsWithIP,
         COUNT(DISTINCT ValidIPAddress) AS UniqueIPs
     FROM Normalized
-    GROUP BY CleanAdminComment
+    GROUP BY AdminComment
 ),
 IPCounts AS (
-    -- Count valid IP usage per CleanAdminComment.
+    -- Count valid IP usage per AdminComment.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         ValidIPAddress,
         COUNT(*) AS IPRecords
     FROM Normalized
     WHERE ValidIPAddress IS NOT NULL
     GROUP BY
-        CleanAdminComment,
+        AdminComment,
         ValidIPAddress
 ),
 TopIP AS (
-    -- Pick the most common valid IP for each CleanAdminComment.
+    -- Pick the most common valid IP for each AdminComment.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         ValidIPAddress AS TopIPAddress,
         IPRecords AS TopIPRecords,
         ROW_NUMBER() OVER (
-            PARTITION BY CleanAdminComment
+            PARTITION BY AdminComment
             ORDER BY IPRecords DESC, ValidIPAddress ASC
         ) AS rn
     FROM IPCounts
@@ -66,7 +66,7 @@ TopIP AS (
 Final AS (
     -- Calculate concentration percentages and the IP evidence decision.
     SELECT
-        c.CleanAdminComment,
+        c.AdminComment,
         c.TotalRecords,
         c.RecordsWithIP,
         c.UniqueIPs,
@@ -92,11 +92,11 @@ Final AS (
         END AS IPEvidenceDecision
     FROM CandidateTotals c
     LEFT JOIN TopIP t
-        ON t.CleanAdminComment = c.CleanAdminComment
+        ON t.AdminComment = c.AdminComment
        AND t.rn = 1
 )
 SELECT
-    CleanAdminComment,
+    AdminComment,
     TotalRecords,
     RecordsWithIP,
     UniqueIPs,

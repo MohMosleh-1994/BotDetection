@@ -1,19 +1,19 @@
 -- Time Analysis / Burst Evidence
--- Runs across all CleanAdminComment values and returns one decision per value.
+-- Runs across all AdminComment values and returns one decision per value.
 
 DECLARE @WindowMinutes INT = 5;
 
 WITH Base AS (
     SELECT
-        CleanAdminComment,
+        AdminComment,
         TRY_CONVERT(datetime2, CreatedOnUtc) AS CreatedOnUtcDate
     FROM Results
-    WHERE CleanAdminComment IS NOT NULL
-      AND LTRIM(RTRIM(CleanAdminComment)) <> ''
+    WHERE AdminComment IS NOT NULL
+      AND LTRIM(RTRIM(AdminComment)) <> ''
 ),
 CandidateTotals AS (
     SELECT
-        CleanAdminComment,
+        AdminComment,
         COUNT(*) AS TotalRecords,
         SUM(
             CASE
@@ -22,18 +22,18 @@ CandidateTotals AS (
             END
         ) AS RecordsWithValidDate
     FROM Base
-    GROUP BY CleanAdminComment
+    GROUP BY AdminComment
 ),
 ValidDates AS (
     SELECT
-        CleanAdminComment,
+        AdminComment,
         CreatedOnUtcDate
     FROM Base
     WHERE CreatedOnUtcDate IS NOT NULL
 ),
 MinuteHits AS (
     SELECT
-        CleanAdminComment,
+        AdminComment,
         DATEADD(
             MINUTE,
             DATEDIFF(MINUTE, 0, CreatedOnUtcDate),
@@ -42,7 +42,7 @@ MinuteHits AS (
         COUNT(*) AS Hits
     FROM ValidDates
     GROUP BY
-        CleanAdminComment,
+        AdminComment,
         DATEADD(
             MINUTE,
             DATEDIFF(MINUTE, 0, CreatedOnUtcDate),
@@ -51,39 +51,39 @@ MinuteHits AS (
 ),
 PeakMinute AS (
     SELECT
-        CleanAdminComment,
+        AdminComment,
         MinuteUtc AS PeakMinuteUtc,
         Hits AS PeakMinuteHits,
         ROW_NUMBER() OVER (
-            PARTITION BY CleanAdminComment
+            PARTITION BY AdminComment
             ORDER BY Hits DESC, MinuteUtc ASC
         ) AS rn
     FROM MinuteHits
 ),
 LocalWindow AS (
     SELECT
-        p.CleanAdminComment,
+        p.AdminComment,
         p.PeakMinuteUtc,
         p.PeakMinuteHits,
         m.Hits AS WindowMinuteHits
     FROM PeakMinute p
     JOIN MinuteHits m
-        ON m.CleanAdminComment = p.CleanAdminComment
+        ON m.AdminComment = p.AdminComment
        AND m.MinuteUtc BETWEEN DATEADD(MINUTE, -@WindowMinutes, p.PeakMinuteUtc)
                            AND DATEADD(MINUTE,  @WindowMinutes, p.PeakMinuteUtc)
     WHERE p.rn = 1
 ),
 MedianCalc AS (
     SELECT DISTINCT
-        CleanAdminComment,
+        AdminComment,
         PeakMinuteUtc,
         PeakMinuteHits,
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY WindowMinuteHits)
-            OVER (PARTITION BY CleanAdminComment, PeakMinuteUtc) AS LocalMedianHits
+            OVER (PARTITION BY AdminComment, PeakMinuteUtc) AS LocalMedianHits
     FROM LocalWindow
 )
 SELECT
-    t.CleanAdminComment,
+    t.AdminComment,
     t.TotalRecords,
     t.RecordsWithValidDate,
     m.PeakMinuteUtc,
@@ -103,7 +103,7 @@ SELECT
     END AS TimeEvidenceDecision
 FROM CandidateTotals t
 LEFT JOIN MedianCalc m
-    ON m.CleanAdminComment = t.CleanAdminComment
+    ON m.AdminComment = t.AdminComment
 ORDER BY
     CASE
         WHEN t.TotalRecords >= 100

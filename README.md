@@ -65,8 +65,9 @@ Output/user_agents_parsed.csv
 Output/user_agent_family_summary.csv
 ```
 
-`Output/user_agents_parsed.csv` preserves the original `AdminComment` and adds
-parsed browser, OS, device, version, known/unknown, and structure-decision
+`Output/user_agents_parsed.csv` writes one row per unique `AdminComment`.
+Duplicate User-Agent rows are combined, `RecordCount` is summed, and the file
+adds parsed browser, OS, device, version, known/unknown, and structure-decision
 fields.
 
 `Output/user_agent_family_summary.csv` groups parsed rows by

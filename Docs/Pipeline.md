@@ -11,9 +11,10 @@ data stored in the SQL Server table `Results`.
 
 ## Important Columns
 
-- `CleanAdminComment`: normalized / cleaned User-Agent pattern. This is usually
-  the input candidate for analysis.
-- `AdminComment`: original User-Agent string.
+- `AdminComment`: original User-Agent string. This is the current primary
+  analysis key.
+- `CleanAdminComment`: normalized / cleaned User-Agent pattern. This can be
+  kept as supporting context, but it is not the current primary analysis key.
 - `IPAddress`: visitor IP address. Sometimes it may contain multiple IPs
   separated by comma; when analyzing IPs, use the first IP only.
 - `RangeSubnet24`: /24 subnet value.
@@ -33,7 +34,7 @@ calculation where that field is required.
 
 ## Current Practical Pipeline
 
-1. Start from suspicious `CleanAdminComment` values from the database.
+1. Start from suspicious `AdminComment` values from the database.
 2. Run Evidence Check to decide if there is enough data.
 3. If Evidence Check is `CONTINUE` or `BORDERLINE`, run:
    - Time Analysis / Burst Evidence
@@ -57,12 +58,12 @@ counts, /24 counts, and /16 counts.
 
 ### Purpose
 
-Determines whether each `CleanAdminComment` has enough evidence to continue
+Determines whether each `AdminComment` has enough evidence to continue
 deeper analysis.
 
 ### Main Output
 
-- `CleanAdminComment`
+- `AdminComment`
 - `RecordCount`
 - `UniqueIPs`
 - `UniqueSubnet24`
@@ -85,8 +86,8 @@ deeper analysis.
 
 Helper script for manual investigation and testing.
 
-It shows how `CleanAdminComment` maps to original `AdminComment`/User-Agent
-values and related network distribution.
+It shows top original `AdminComment`/User-Agent values and related network
+distribution.
 
 ### Expected Sections
 
@@ -104,7 +105,7 @@ pipeline decision step.
 
 ### Purpose
 
-Detects burst behavior for `CleanAdminComment` values.
+Detects burst behavior for `AdminComment` values.
 
 ### Core Idea
 
@@ -139,7 +140,7 @@ Use `TRY_CONVERT(datetime2, CreatedOnUtc)` to avoid conversion errors.
 
 ### Purpose
 
-Detects whether one IP address dominates traffic for a `CleanAdminComment`.
+Detects whether one IP address dominates traffic for an `AdminComment`.
 
 ### Important IP Rule
 
@@ -147,7 +148,7 @@ If `IPAddress` contains multiple IPs separated by comma, use only the first IP.
 
 ### Main Output
 
-- `CleanAdminComment`
+- `AdminComment`
 - `TotalRecords`
 - `RecordsWithIP`
 - `UniqueIPs`
@@ -160,8 +161,7 @@ If `IPAddress` contains multiple IPs separated by comma, use only the first IP.
 ### Decision Logic
 
 - `LOW EVIDENCE` if `TotalRecords < 100` AND `UniqueIPs < 100`
-- `WORTH CHECKING` if `TopIPRecords >= 100` OR
-  `TopIPCoverageFromValidIPRecordsPercent >= 20`
+- `WORTH CHECKING` if `TopIPCoverageFromValidIPRecordsPercent >= 20`
 - `LOW IP CONCENTRATION` otherwise
 
 ### Important
@@ -177,11 +177,11 @@ Invalid IP values include real `NULL`, empty string, `NULL`, `N/A`, `NA`, and
 
 ### Purpose
 
-Detects whether one /24 subnet dominates traffic for a `CleanAdminComment`.
+Detects whether one /24 subnet dominates traffic for an `AdminComment`.
 
 ### Main Output
 
-- `CleanAdminComment`
+- `AdminComment`
 - `TotalRecords`
 - `RecordsWithSubnet24`
 - `UniqueSubnet24`
@@ -194,8 +194,7 @@ Detects whether one /24 subnet dominates traffic for a `CleanAdminComment`.
 ### Decision Logic
 
 - `LOW EVIDENCE` if `TotalRecords < 100` AND `UniqueSubnet24 < 100`
-- `WORTH CHECKING` if `TopSubnet24Records >= 100` OR
-  `TopSubnet24CoverageFromValidSubnet24RecordsPercent >= 20`
+- `WORTH CHECKING` if `TopSubnet24CoverageFromValidSubnet24RecordsPercent >= 20`
 - `LOW /24 CONCENTRATION` otherwise
 
 ### Invalid /24 Values
@@ -217,8 +216,8 @@ Not fully implemented yet.
 
 ### Goal
 
-Find the `AdminComment`/User-Agent that best represents a `CleanAdminComment`
-and can be used later to generate a safe Browscap wildcard.
+Use the analyzed `AdminComment`/User-Agent as the candidate value for safe
+Browscap wildcard generation.
 
 ### Future Goals
 

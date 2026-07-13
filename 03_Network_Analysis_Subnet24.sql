@@ -1,19 +1,19 @@
 -- Network Analysis - /24 Subnet Evidence
--- Runs across all CleanAdminComment values and detects /24 subnet concentration.
+-- Runs across all AdminComment values and detects /24 subnet concentration.
 
 WITH Base AS (
     -- Keep every record for TotalRecords; only normalize /24 for /24-specific metrics.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         LTRIM(RTRIM(RangeSubnet24)) AS Subnet24
     FROM Results
-    WHERE CleanAdminComment IS NOT NULL
-      AND LTRIM(RTRIM(CleanAdminComment)) <> ''
+    WHERE AdminComment IS NOT NULL
+      AND LTRIM(RTRIM(AdminComment)) <> ''
 ),
 Normalized AS (
     -- Exclude only invalid /24 values from /24 calculations.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         CASE
             WHEN Subnet24 IS NULL THEN NULL
             WHEN Subnet24 = '' THEN NULL
@@ -25,33 +25,33 @@ Normalized AS (
 CandidateTotals AS (
     -- TotalRecords counts all records, even when RangeSubnet24 is missing or invalid.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         COUNT(*) AS TotalRecords,
         COUNT(ValidSubnet24) AS RecordsWithSubnet24,
         COUNT(DISTINCT ValidSubnet24) AS UniqueSubnet24
     FROM Normalized
-    GROUP BY CleanAdminComment
+    GROUP BY AdminComment
 ),
 Subnet24Counts AS (
-    -- Count valid /24 subnet usage per CleanAdminComment.
+    -- Count valid /24 subnet usage per AdminComment.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         ValidSubnet24,
         COUNT(*) AS Subnet24Records
     FROM Normalized
     WHERE ValidSubnet24 IS NOT NULL
     GROUP BY
-        CleanAdminComment,
+        AdminComment,
         ValidSubnet24
 ),
 TopSubnet24 AS (
-    -- Pick the most common valid /24 subnet for each CleanAdminComment.
+    -- Pick the most common valid /24 subnet for each AdminComment.
     SELECT
-        CleanAdminComment,
+        AdminComment,
         ValidSubnet24 AS TopSubnet24,
         Subnet24Records AS TopSubnet24Records,
         ROW_NUMBER() OVER (
-            PARTITION BY CleanAdminComment
+            PARTITION BY AdminComment
             ORDER BY Subnet24Records DESC, ValidSubnet24 ASC
         ) AS rn
     FROM Subnet24Counts
@@ -59,7 +59,7 @@ TopSubnet24 AS (
 Final AS (
     -- Calculate concentration percentages and the /24 evidence decision.
     SELECT
-        c.CleanAdminComment,
+        c.AdminComment,
         c.TotalRecords,
         c.RecordsWithSubnet24,
         c.UniqueSubnet24,
@@ -85,11 +85,11 @@ Final AS (
         END AS Subnet24EvidenceDecision
     FROM CandidateTotals c
     LEFT JOIN TopSubnet24 t
-        ON t.CleanAdminComment = c.CleanAdminComment
+        ON t.AdminComment = c.AdminComment
        AND t.rn = 1
 )
 SELECT
-    CleanAdminComment,
+    AdminComment,
     TotalRecords,
     RecordsWithSubnet24,
     UniqueSubnet24,

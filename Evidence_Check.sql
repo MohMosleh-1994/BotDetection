@@ -1,6 +1,6 @@
 WITH Evidence AS (
     SELECT
-        CleanAdminComment,
+        AdminComment,
         COUNT(*) AS RecordCount,
 
         COUNT(DISTINCT NULLIF(LTRIM(RTRIM(IPAddress)), '')) AS UniqueIPs,
@@ -16,13 +16,13 @@ WITH Evidence AS (
             MAX(TRY_CONVERT(datetime2, CreatedOnUtc))
         ) AS ActiveMinutes
     FROM Results
-    WHERE CleanAdminComment IS NOT NULL
-      AND LTRIM(RTRIM(CleanAdminComment)) <> ''
+    WHERE AdminComment IS NOT NULL
+      AND LTRIM(RTRIM(AdminComment)) <> ''
       AND TRY_CONVERT(datetime2, CreatedOnUtc) IS NOT NULL
-    GROUP BY CleanAdminComment
+    GROUP BY AdminComment
 )
 SELECT
-    CleanAdminComment,
+    AdminComment,
     RecordCount,
     UniqueIPs,
     UniqueSubnet24,
