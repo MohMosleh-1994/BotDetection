@@ -13,7 +13,7 @@ from Config.db_config import (
 
 
 def load_sql_query(sql_file: Path) -> str:
-    with open(sql_file, "r", encoding="utf-8") as file:
+    with open(sql_file, "r", encoding="utf-8-sig") as file:
         return file.read()
 
 
