@@ -96,9 +96,11 @@ SELECT
     CASE
         WHEN t.TotalRecords < 100 THEN 'LOW EVIDENCE'
         WHEN t.RecordsWithValidDate = 0 THEN 'NO VALID DATES'
-        WHEN m.PeakMinuteHits >= 100
-         AND m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 20
+        WHEN m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 20
         THEN 'WORTH CHECKING'
+        WHEN m.PeakMinuteHits >= 100
+          OR m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 10
+        THEN 'MODERATE BURST'
         ELSE 'LOW BURST'
     END AS TimeEvidenceDecision
 FROM CandidateTotals t
@@ -106,12 +108,14 @@ LEFT JOIN MedianCalc m
     ON m.AdminComment = t.AdminComment
 ORDER BY
     CASE
-        WHEN t.TotalRecords >= 100
-         AND m.PeakMinuteHits >= 100
-         AND m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 20
-        THEN 0
-        WHEN t.TotalRecords < 100 THEN 2
-        ELSE 1
+        WHEN t.TotalRecords < 100 THEN 4
+        WHEN t.RecordsWithValidDate = 0 THEN 5
+        WHEN m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 20
+        THEN 1
+        WHEN m.PeakMinuteHits >= 100
+          OR m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 10
+        THEN 2
+        ELSE 3
     END,
     BurstScore DESC,
     m.PeakMinuteHits DESC,

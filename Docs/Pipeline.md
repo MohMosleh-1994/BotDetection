@@ -34,16 +34,21 @@ calculation where that field is required.
 
 ## Current Practical Pipeline
 
-1. Start from suspicious `AdminComment` values from the database.
-2. Run Evidence Check to decide if there is enough data.
-3. If Evidence Check is `CONTINUE` or `BORDERLINE`, run:
+1. Read candidate traffic from the `Results` table.
+2. Run User-Agent Candidate Ranking to order `AdminComment` values from
+   highest priority to lowest priority.
+3. For selected candidates, run:
    - Time Analysis / Burst Evidence
-   - Network Analysis
-   - Representative User-Agent Analysis
+   - Per-UA IP Analysis
+   - Per-UA /24 Analysis
 4. Human analyst reviews the combined results.
 5. If suspicious, generate a Browscap wildcard candidate.
 6. Validate for false positives.
 7. Generate Browscap XML rule.
+
+Global IP, global /24, and global /16 analyses remain independent helper
+analyses. They read directly from `Results` and do not feed the per-User-Agent
+candidate score yet.
 
 ## Coverage Analysis
 
@@ -54,12 +59,15 @@ It is not a core decision stage.
 It helps inspect related `AdminComment`/User-Agent values, record counts, IP
 counts, /24 counts, and /16 counts.
 
-## 00_Evidence_Check.sql
+## SQL/00_UserAgent_Candidate_Ranking.sql
 
 ### Purpose
 
-Determines whether each `AdminComment` has enough evidence to continue
-deeper analysis.
+Generates a ranked list of `AdminComment`/User-Agent candidates for analyst
+investigation.
+
+This module is not a decision gate. It does not classify candidates, and it
+does not return continue, borderline, or stop decisions.
 
 ### Main Output
 
@@ -71,14 +79,21 @@ deeper analysis.
 - `FirstSeenUtc`
 - `LastSeenUtc`
 - `ActiveMinutes`
-- `EvidenceDecision`
 
-### Decision Logic
+### Sort Order
 
-- `CONTINUE` if `RecordCount >= 100` OR `UniqueIPs >= 100`
-- `BORDERLINE` if `RecordCount` is between 50 and 99 OR `UniqueIPs` is between
-  50 and 99
-- `STOP - Insufficient Evidence` otherwise
+1. `RecordCount DESC`
+2. `UniqueIPs DESC`
+3. `UniqueSubnet24 DESC`
+4. `ActiveMinutes DESC`
+
+### Important
+
+Use `AdminComment` as the candidate key.
+
+Do not use `CleanAdminComment` in this module.
+
+Do not calculate any candidate decision value.
 
 ## 01_Coverage_Analysis.sql
 
@@ -235,7 +250,7 @@ Planned future enhancement.
 
 It should combine evidence from:
 
-- Evidence Check
+- User-Agent Candidate Ranking volume and coverage context
 - Time/Burst behavior
 - Network concentration
 - Representative User-Agent stability

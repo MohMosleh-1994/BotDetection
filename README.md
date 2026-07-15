@@ -7,6 +7,27 @@ The Python CSV tool does not connect to SQL Server. It reads exported CSV files,
 parses `AdminComment` User-Agent strings with `ua-parser`, and writes structured
 CSV output files for review.
 
+## Current Analysis Pipeline
+
+The core SQL investigation flow is:
+
+```text
+Results
+    ↓
+User-Agent Candidate Ranking
+    ↓
+(Time Analysis)
+(Per-UA IP Analysis)
+(Per-UA /24 Analysis)
+```
+
+`SQL/00_UserAgent_Candidate_Ranking.sql` ranks `AdminComment` User-Agent values
+from highest priority to lowest priority. It does not classify User-Agents and
+does not return continue, borderline, or stop decisions.
+
+Global IP, global /24, and global /16 analyses are independent. They continue
+to read directly from `Results`.
+
 ## Setup
 
 ### Windows CMD
