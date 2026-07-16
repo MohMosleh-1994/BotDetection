@@ -1,31 +1,39 @@
 # BotDetection
 
-This repository contains SQL and Python helpers for analyzing suspicious
-User-Agent patterns from the SQL Server `Results` table.
+This repository contains SQL references and Python helpers for analyzing
+suspicious User-Agent patterns from exported `Results.csv` data.
 
-The Python CSV tools read exported CSV files, parse `AdminComment` User-Agent
-strings with `ua-parser`, and write structured CSV output files for review.
+The active pipeline reads one exported CSV file into pandas, runs independent
+Python analysis modules, parses `AdminComment` User-Agent strings with
+`ua-parser`, and writes structured CSV output files for review.
 
 ## Current Analysis Pipeline
 
-The core SQL investigation flow is:
+The core investigation flow is:
 
 ```text
-Results
+Results.csv
     ->
 User-Agent Candidate Ranking
     ->
 (Time Analysis)
 (Per-UA IP Analysis)
 (Per-UA /24 Analysis)
+(Global IP Analysis)
+(Global /24 Analysis)
+(Global /16 Analysis)
+    ->
+User-Agent Structure Analysis
+    ->
+Final Scoring Reports
 ```
 
-`SQL/00_UserAgent_Candidate_Ranking.sql` ranks `AdminComment` User-Agent values
-from highest priority to lowest priority. It does not classify User-Agents and
-does not return continue, borderline, or stop decisions.
+`run_analysis_pipeline.py` is the main entry point. It reads the input CSV once,
+normalizes shared columns once, then passes the same prepared pandas DataFrame
+to each module.
 
-Global IP, global /24, and global /16 analyses are independent. They continue
-to read directly from `Results`.
+The `.sql` files are kept as reference scripts for manual SQL review. They are
+not executed by the active Python pipeline.
 
 ## Setup
 
@@ -45,35 +53,6 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-## SQL Server Settings
-
-The full pipeline uses SQL Server as the only SQL engine. It imports the input
-CSV into `dbo.Results`, executes the repository `.sql` files directly, and
-exports each result set to CSV.
-
-Default connection settings use Windows Authentication:
-
-```text
-BOTDETECTION_SQL_DRIVER=ODBC Driver 17 for SQL Server
-BOTDETECTION_SQL_SERVER=localhost
-BOTDETECTION_SQL_DATABASE=tempdb
-```
-
-For SQL login, set:
-
-```text
-BOTDETECTION_SQL_USERNAME=your-user
-BOTDETECTION_SQL_PASSWORD=your-password
-```
-
-If `dbo.Results` already exists and is not marked as a BotDetection pipeline
-table, the pipeline refuses to overwrite it. For a scratch/local database only,
-set:
-
-```text
-BOTDETECTION_SQL_ALLOW_OVERWRITE_RESULTS=1
-```
-
 ## Run Full Analysis Pipeline
 
 The main entry point is:
@@ -88,8 +67,8 @@ PowerShell:
 python .\Python\run_analysis_pipeline.py "Data\Raw\Results.csv"
 ```
 
-The pipeline creates a timestamped folder under `Output/`, runs the approved SQL
-analysis scripts, runs the User-Agent structure parser, then automatically
+The pipeline creates one timestamped folder under `Output/`, runs the in-memory
+analysis modules, runs the User-Agent structure parser, then automatically
 builds final scoring reports.
 
 The scoring builder can also be run by itself against an existing output folder:
@@ -97,6 +76,21 @@ The scoring builder can also be run by itself against an existing output folder:
 ```cmd
 python Python\build_scoring_reports.py "Output\2026-07-16_123800"
 ```
+
+The full pipeline writes these output files into the timestamped output folder:
+
+- `Candidate_Summary.csv`
+- `Time_Analysis.csv`
+- `PerUA_IP_Analysis.csv`
+- `PerUA_Subnet24_Analysis.csv`
+- `Global_IP_Analysis.csv`
+- `Global_Subnet24_Analysis.csv`
+- `Global_Subnet16_Analysis.csv`
+- `UA_Structure_Analysis.csv`
+- `Final_Suspicious_Report.csv`
+- `Final_Review_Queue.csv`
+- `Global_Investigation_Report.csv`
+- `Run_Summary.txt`
 
 ## Run User-Agent CSV Analysis
 

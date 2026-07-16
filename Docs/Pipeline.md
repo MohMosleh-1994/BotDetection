@@ -3,7 +3,7 @@
 ## Project Purpose
 
 This project analyzes suspicious website visitors based on User-Agent related
-data stored in the SQL Server table `Results`.
+data exported from the `Results` table into `Results.csv`.
 
 ## Main Table
 
@@ -34,21 +34,30 @@ calculation where that field is required.
 
 ## Current Practical Pipeline
 
-1. Read candidate traffic from the `Results` table.
-2. Run User-Agent Candidate Ranking to order `AdminComment` values from
+1. Read `Results.csv` once in `run_analysis_pipeline.py`.
+2. Normalize shared columns once into a prepared pandas DataFrame.
+3. Run User-Agent Candidate Ranking to order `AdminComment` values from
    highest priority to lowest priority.
-3. For selected candidates, run:
+4. Run the in-memory Python analysis modules:
    - Time Analysis / Burst Evidence
    - Per-UA IP Analysis
    - Per-UA /24 Analysis
-4. Human analyst reviews the combined results.
-5. If suspicious, generate a Browscap wildcard candidate.
-6. Validate for false positives.
-7. Generate Browscap XML rule.
+   - Global IP Analysis
+   - Global /24 Analysis
+   - Global /16 Analysis
+5. Run User-Agent structure analysis.
+6. Run final scoring report generation.
+7. Human analyst reviews the combined results.
+8. If suspicious, generate a Browscap wildcard candidate.
+9. Validate for false positives.
+10. Generate Browscap XML rule.
+
+The `.sql` files are retained as reference/manual SQL scripts. They are not
+executed by the active Python pipeline.
 
 Global IP, global /24, and global /16 analyses remain independent helper
-analyses. They read directly from `Results` and do not feed the per-User-Agent
-candidate score yet.
+analyses. They use the same prepared pandas DataFrame and do not feed the
+per-User-Agent candidate score yet.
 
 ## Coverage Analysis
 
@@ -63,8 +72,9 @@ counts, /24 counts, and /16 counts.
 
 ### Purpose
 
-Generates a ranked list of `AdminComment`/User-Agent candidates for analyst
-investigation.
+Reference SQL script for the ranked list of `AdminComment`/User-Agent
+candidates. The active pipeline implementation is
+`Python/candidate_ranking.py`.
 
 This module is not a decision gate. It does not classify candidates, and it
 does not return continue, borderline, or stop decisions.
@@ -120,7 +130,8 @@ pipeline decision step.
 
 ### Purpose
 
-Detects burst behavior for `AdminComment` values.
+Reference SQL script for burst behavior. The active pipeline implementation is
+`Python/time_analysis.py`.
 
 ### Core Idea
 
@@ -133,17 +144,37 @@ suddenly spike in a specific minute.
 - `PeakMinuteHits`
 - `LocalMedianHits`
 - `BurstScore`
-- `TimeEvidenceDecision`
+- `PeakVolumeScore`
+- `BurstScoreValue`
+- `TimeScore`
+- `TimePriority`
 
 ### Burst Logic
 
 `BurstScore = PeakMinuteHits / LocalMedianHits`
 
-### Decision Logic
+### Scoring Logic
 
-- `LOW EVIDENCE` if `TotalRecords < 100`
-- `WORTH CHECKING` if `PeakMinuteHits >= 100` AND `BurstScore >= 20`
-- `LOW BURST` otherwise
+`PeakVolumeScore`, maximum 10:
+
+- `PeakMinuteHits < 50` = 0
+- `50 to 74` = 2
+- `75 to 99` = 4
+- `100 to 149` = 7
+- `150 or more` = 10
+
+`BurstScoreValue`, maximum 5:
+
+- `BurstScore < 2` = 0
+- `2 to less than 5` = 1
+- `5 to less than 10` = 2
+- `10 to less than 20` = 3
+- `20 to less than 40` = 4
+- `40 or more` = 5
+
+`TimeScore = PeakVolumeScore + BurstScoreValue`
+
+Maximum `TimeScore` is 15.
 
 ### Important
 
@@ -155,7 +186,8 @@ Use `TRY_CONVERT(datetime2, CreatedOnUtc)` to avoid conversion errors.
 
 ### Purpose
 
-Detects whether one IP address dominates traffic for an `AdminComment`.
+Reference SQL script for IP concentration. The active pipeline implementation is
+`Python/ip_analysis.py`.
 
 ### Important IP Rule
 
@@ -171,13 +203,25 @@ If `IPAddress` contains multiple IPs separated by comma, use only the first IP.
 - `TopIPRecords`
 - `TopIPCoverageFromTotalRecordsPercent`
 - `TopIPCoverageFromValidIPRecordsPercent`
+- `IPConcentrationScore`
+- `IPVolumeScore`
+- `IPScore`
+- `IPPriority`
+- `IPScoreReason`
 - `IPEvidenceDecision`
 
-### Decision Logic
+### Scoring Logic
 
-- `LOW EVIDENCE` if `TotalRecords < 100` AND `UniqueIPs < 100`
-- `WORTH CHECKING` if `TopIPCoverageFromValidIPRecordsPercent >= 20`
-- `LOW IP CONCENTRATION` otherwise
+If `TotalRecords < 100`:
+
+- `IPScore = 0`
+- `IPScoreReason = Insufficient sample size`
+
+Otherwise:
+
+- calculate `IPConcentrationScore` from 0 to 5
+- calculate `IPVolumeScore` from 0 to 5 using `TopIPRecords`
+- `IPScore = IPConcentrationScore + IPVolumeScore`
 
 ### Important
 
@@ -192,7 +236,8 @@ Invalid IP values include real `NULL`, empty string, `NULL`, `N/A`, `NA`, and
 
 ### Purpose
 
-Detects whether one /24 subnet dominates traffic for an `AdminComment`.
+Reference SQL script for /24 concentration. The active pipeline implementation
+is `Python/subnet24_analysis.py`.
 
 ### Main Output
 
@@ -246,14 +291,10 @@ Browscap wildcard generation.
 
 ## Scoring System
 
-Planned future enhancement.
-
-It should combine evidence from:
+The active final scoring report combines evidence from:
 
 - User-Agent Candidate Ranking volume and coverage context
 - Time/Burst behavior
 - Network concentration
 - Representative User-Agent stability
-- False-positive risk
-
-Do not implement scoring until all core analysis modules are stable.
+- False-positive risk remains a human-review consideration.

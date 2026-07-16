@@ -11,9 +11,6 @@ from ua_csv_analysis import (
     build_parsed_rows,
     build_summary,
     is_unknown,
-    prepare_input_rows,
-    read_csv_with_fallback,
-    validate_input_columns,
 )
 
 
@@ -39,15 +36,12 @@ def build_ua_reason(row: pd.Series) -> str:
     return "Missing: " + ", ".join(missing_fields)
 
 
-def run_user_agent_parser(input_path: Path, output_dir: Path) -> ModuleStatus:
-    """Call ua_csv_analysis.py logic and write UA analysis outputs."""
+def run_user_agent_parser(rows: pd.DataFrame, output_dir: Path) -> ModuleStatus:
+    """Call ua_csv_analysis.py logic against the shared prepared DataFrame."""
     output_filename = "UA_Structure_Analysis.csv"
 
     try:
-        results_df = read_csv_with_fallback(input_path)
-        validate_input_columns(results_df)
-        input_rows = prepare_input_rows(results_df)
-        parsed_df = build_parsed_rows(input_rows)
+        parsed_df = build_parsed_rows(rows)
         summary_df = build_summary(parsed_df)
 
         ua_structure = pd.DataFrame(

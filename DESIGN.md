@@ -2,7 +2,8 @@
 
 ## Core Data Source
 
-The project analyzes User-Agent activity from the SQL Server `Results` table.
+The active pipeline analyzes User-Agent activity from an exported `Results.csv`
+file. SQL scripts remain in the repository as manual reference scripts.
 
 `AdminComment` is the raw User-Agent string and is the primary per-User-Agent
 analysis key.
@@ -14,18 +15,31 @@ candidate key in the current per-User-Agent pipeline.
 
 ```text
 Results
-    ↓
+    ->
+Results.csv
+    ->
 User-Agent Candidate Ranking
-    ↓
+    ->
 (Time Analysis)
 (Per-UA IP Analysis)
 (Per-UA /24 Analysis)
+(Global IP Analysis)
+(Global /24 Analysis)
+(Global /16 Analysis)
+    ->
+User-Agent Structure Analysis
+    ->
+Final Scoring Reports
 ```
+
+`run_analysis_pipeline.py` reads `Results.csv` once, normalizes shared columns
+once, and passes the same prepared pandas DataFrame to each analysis module.
 
 ## User-Agent Candidate Ranking
 
-`SQL/00_UserAgent_Candidate_Ranking.sql` creates a ranked candidate table for
-analyst investigation.
+`Python/candidate_ranking.py` creates a ranked candidate table for analyst
+investigation. `SQL/00_UserAgent_Candidate_Ranking.sql` is kept as the manual
+SQL reference for the same concept.
 
 The module returns volume, IP spread, subnet spread, and active time fields per
 `AdminComment`. It does not classify candidates and does not decide whether a
@@ -39,10 +53,10 @@ investigated first.
 Time Analysis, Per-UA IP Analysis, and Per-UA /24 Analysis all use
 `AdminComment` as their per-User-Agent key.
 
-Each analysis reads from `Results` and produces evidence that can be reviewed
-alongside the candidate ranking output.
+Each analysis receives the same prepared DataFrame and produces evidence that
+can be reviewed alongside the candidate ranking output.
 
 ## Global Analyses
 
-Global IP, global /24, and global /16 analyses remain independent. They read
-directly from `Results` and are not part of the per-User-Agent ranking stage.
+Global IP, global /24, and global /16 analyses remain independent. They use the
+same prepared DataFrame and are not part of the per-User-Agent ranking stage.
