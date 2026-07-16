@@ -63,8 +63,8 @@ TopIP AS (
         ) AS rn
     FROM IPCounts
 ),
-Final AS (
-    -- Calculate concentration percentages and the IP evidence decision.
+Metrics AS (
+    -- Calculate concentration percentages before assigning component scores.
     SELECT
         c.AdminComment,
         c.TotalRecords,
@@ -79,21 +79,57 @@ Final AS (
         CAST(
             COALESCE(t.TopIPRecords, 0) * 100.0 / NULLIF(c.RecordsWithIP, 0)
             AS DECIMAL(10,2)
-        ) AS TopIPCoverageFromValidIPRecordsPercent,
-        CASE
-            WHEN c.TotalRecords < 100
-             AND c.UniqueIPs < 100
-            THEN 'LOW EVIDENCE'
-
-            WHEN COALESCE(t.TopIPRecords, 0) * 100.0 / NULLIF(c.RecordsWithIP, 0) >= 20
-            THEN 'WORTH CHECKING'
-
-            ELSE 'LOW IP CONCENTRATION'
-        END AS IPEvidenceDecision
+        ) AS TopIPCoverageFromValidIPRecordsPercent
     FROM CandidateTotals c
     LEFT JOIN TopIP t
         ON t.AdminComment = c.AdminComment
        AND t.rn = 1
+),
+ComponentScores AS (
+    -- Score concentration from 0-5 using gradual coverage bands.
+    -- Score volume from 0-5 using smooth curves for both total traffic and
+    -- top-IP traffic. TopIPRecords receives more weight because it is the
+    -- suspicious volume directly attributable to the leading IP.
+    SELECT
+        AdminComment,
+        TotalRecords,
+        RecordsWithIP,
+        UniqueIPs,
+        TopIPAddress,
+        TopIPRecords,
+        TopIPCoverageFromTotalRecordsPercent,
+        TopIPCoverageFromValidIPRecordsPercent,
+        CASE
+            WHEN COALESCE(TopIPCoverageFromValidIPRecordsPercent, 0) < 5 THEN 0
+            WHEN TopIPCoverageFromValidIPRecordsPercent < 10 THEN 1
+            WHEN TopIPCoverageFromValidIPRecordsPercent < 20 THEN 2
+            WHEN TopIPCoverageFromValidIPRecordsPercent < 30 THEN 3
+            WHEN TopIPCoverageFromValidIPRecordsPercent < 50 THEN 4
+            ELSE 5
+        END AS IPConcentrationScore,
+        CAST(ROUND(
+            0.40 * (5.0 * TotalRecords / (TotalRecords + 200.0))
+          + 0.60 * (5.0 * TopIPRecords / (TopIPRecords + 50.0)),
+            0
+        ) AS INT) AS IPVolumeScore
+    FROM Metrics
+),
+Scored AS (
+    -- Combine the two independent components into the final 0-10 score.
+    SELECT
+        *,
+        IPConcentrationScore + IPVolumeScore AS IPScore
+    FROM ComponentScores
+),
+Final AS (
+    SELECT
+        *,
+        CASE
+            WHEN IPScore >= 8 THEN 'HIGH'
+            WHEN IPScore >= 5 THEN 'MEDIUM'
+            ELSE 'LOW'
+        END AS IPPriority
+    FROM Scored
 )
 SELECT
     AdminComment,
@@ -104,13 +140,13 @@ SELECT
     TopIPRecords,
     TopIPCoverageFromTotalRecordsPercent,
     TopIPCoverageFromValidIPRecordsPercent,
-    IPEvidenceDecision
+    IPConcentrationScore,
+    IPVolumeScore,
+    IPScore,
+    IPPriority
 FROM Final
 ORDER BY
-    CASE
-        WHEN IPEvidenceDecision = 'WORTH CHECKING' THEN 1
-        WHEN IPEvidenceDecision = 'LOW IP CONCENTRATION' THEN 2
-        WHEN IPEvidenceDecision = 'LOW EVIDENCE' THEN 3
-        ELSE 4
-    END,
-    TopIPCoverageFromValidIPRecordsPercent DESC;
+    IPScore DESC,
+    TopIPCoverageFromValidIPRecordsPercent DESC,
+    TopIPRecords DESC,
+    TotalRecords DESC;
