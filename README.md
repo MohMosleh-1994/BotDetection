@@ -3,9 +3,8 @@
 This repository contains SQL and Python helpers for analyzing suspicious
 User-Agent patterns from the SQL Server `Results` table.
 
-The Python CSV tool does not connect to SQL Server. It reads exported CSV files,
-parses `AdminComment` User-Agent strings with `ua-parser`, and writes structured
-CSV output files for review.
+The Python CSV tools read exported CSV files, parse `AdminComment` User-Agent
+strings with `ua-parser`, and write structured CSV output files for review.
 
 ## Current Analysis Pipeline
 
@@ -13,9 +12,9 @@ The core SQL investigation flow is:
 
 ```text
 Results
-    ↓
+    ->
 User-Agent Candidate Ranking
-    ↓
+    ->
 (Time Analysis)
 (Per-UA IP Analysis)
 (Per-UA /24 Analysis)
@@ -44,6 +43,30 @@ python -m pip install -r requirements.txt
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+```
+
+## Run Full Analysis Pipeline
+
+The main entry point is:
+
+```cmd
+python Python\run_analysis_pipeline.py "Data\Raw\Results.csv"
+```
+
+PowerShell:
+
+```powershell
+python .\Python\run_analysis_pipeline.py "Data\Raw\Results.csv"
+```
+
+The pipeline creates a timestamped folder under `Output/`, runs the approved SQL
+analysis scripts, runs the User-Agent structure parser, then automatically
+builds final scoring reports.
+
+The scoring builder can also be run by itself against an existing output folder:
+
+```cmd
+python Python\build_scoring_reports.py "Output\2026-07-16_123800"
 ```
 
 ## Run User-Agent CSV Analysis

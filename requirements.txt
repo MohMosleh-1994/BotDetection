@@ -1,3 +1,4 @@
 pandas
 ua-parser
 pyodbc
+duckdb
