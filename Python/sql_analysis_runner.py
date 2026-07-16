@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import pandas as pd
@@ -25,7 +27,7 @@ SQL_MODULES = [
 
 RESULTS_TABLE = "dbo.Results"
 PIPELINE_MARKER = "BotDetectionPipelineTable"
-INSERT_BATCH_SIZE = 1000
+INSERT_BATCH_SIZE = 10000
 
 CANONICAL_COLUMN_ALIASES = {
     "AdminComment": ["AdminComment"],
@@ -219,6 +221,16 @@ def print_final_table_schema(columns: Any) -> None:
         print(f"  {index}. {quote_identifier(str(column))} nvarchar(max) NULL")
 
 
+def timestamp_now() -> str:
+    """Return a readable local timestamp for import logs."""
+    return datetime.now().isoformat(sep=" ", timespec="seconds")
+
+
+def format_duration(seconds: float) -> str:
+    """Format elapsed seconds for console logs."""
+    return f"{seconds:.2f} seconds"
+
+
 def is_pipeline_results_table(cursor: Any) -> bool:
     """Return whether dbo.Results was created by this pipeline."""
     cursor.execute(
@@ -278,9 +290,17 @@ def create_results_table(cursor: Any, df: pd.DataFrame) -> None:
     add_results_table_marker(cursor)
 
 
-def insert_results_rows(cursor: Any, df: pd.DataFrame) -> None:
+def insert_results_rows(cursor: Any, connection: Any, df: pd.DataFrame) -> None:
     """Insert Results.csv rows into SQL Server in batches."""
+    total_rows = len(df)
+    import_start_time = timestamp_now()
+    import_start_clock = perf_counter()
+    print(f"Import start time: {import_start_time}")
+
     if df.empty:
+        import_end_time = timestamp_now()
+        print(f"Import end time: {import_end_time}")
+        print("Total import duration: 0.00 seconds")
         return
 
     import_df = df.where(pd.notna(df), None)
@@ -289,17 +309,43 @@ def insert_results_rows(cursor: Any, df: pd.DataFrame) -> None:
     insert_sql = f"INSERT INTO {RESULTS_TABLE} ({columns_sql}) VALUES ({placeholders})"
 
     cursor.fast_executemany = True
-    for start in range(0, len(import_df), INSERT_BATCH_SIZE):
-        batch = import_df.iloc[start : start + INSERT_BATCH_SIZE]
-        cursor.executemany(insert_sql, list(batch.itertuples(index=False, name=None)))
+    for start in range(0, total_rows, INSERT_BATCH_SIZE):
+        end = min(start + INSERT_BATCH_SIZE, total_rows)
+        batch = import_df.iloc[start:end]
+        batch_rows = list(batch.itertuples(index=False, name=None))
+
+        try:
+            cursor.executemany(insert_sql, batch_rows)
+            connection.commit()
+        except Exception as exc:
+            print(f"Insert batch failed: rows {start + 1} - {end}")
+            print(f"Exact exception: {type(exc).__name__}: {exc}")
+            raise
+
+        print(f"Imported {end:,} / {total_rows:,} rows")
+
+    import_end_time = timestamp_now()
+    import_duration = perf_counter() - import_start_clock
+    print(f"Import end time: {import_end_time}")
+    print(f"Total import duration: {format_duration(import_duration)}")
 
 
-def import_results_csv(cursor: Any, results_df: pd.DataFrame) -> None:
+def import_results_csv(cursor: Any, connection: Any, results_df: pd.DataFrame) -> None:
     """Replace dbo.Results with the current Results.csv contents."""
     allow_existing_table = sql_bool_env("BOTDETECTION_SQL_ALLOW_OVERWRITE_RESULTS")
     drop_results_table(cursor, allow_existing_table=allow_existing_table)
+
+    table_start_time = timestamp_now()
+    table_start_clock = perf_counter()
+    print(f"Table creation start time: {table_start_time}")
     create_results_table(cursor, results_df)
-    insert_results_rows(cursor, results_df)
+    connection.commit()
+    table_end_time = timestamp_now()
+    table_duration = perf_counter() - table_start_clock
+    print(f"Table creation end time: {table_end_time}")
+    print(f"Table creation duration: {format_duration(table_duration)}")
+
+    insert_results_rows(cursor, connection, results_df)
 
 
 def dataframe_from_cursor(cursor: Any) -> pd.DataFrame:
@@ -358,7 +404,7 @@ def run_sql_analysis_modules(input_path: Path, output_dir: Path) -> tuple[list[M
     try:
         connection = pyodbc.connect(build_connection_string())
         cursor = connection.cursor()
-        import_results_csv(cursor, results_df)
+        import_results_csv(cursor, connection, results_df)
         connection.commit()
 
         for name, relative_sql_path, output_filename in SQL_MODULES:
