@@ -104,11 +104,10 @@ ComponentScores AS (
         *,
         CASE
             WHEN COALESCE(PeakMinuteHits, 0) < 50 THEN 0
-            WHEN PeakMinuteHits < 100 THEN 1
-            WHEN PeakMinuteHits < 200 THEN 2
-            WHEN PeakMinuteHits < 300 THEN 3
-            WHEN PeakMinuteHits < 500 THEN 4
-            ELSE 5
+            WHEN PeakMinuteHits < 75 THEN 2
+            WHEN PeakMinuteHits < 100 THEN 4
+            WHEN PeakMinuteHits < 150 THEN 7
+            ELSE 10
         END AS PeakVolumeScore,
         CASE
             WHEN COALESCE(BurstScore, 0) < 2 THEN 0
@@ -138,10 +137,10 @@ SELECT
     BurstScoreValue,
     TimeScore,
     CASE
-        WHEN TimeScore >= 9 THEN 'VERY HIGH'
-        WHEN TimeScore >= 7 THEN 'HIGH'
-        WHEN TimeScore >= 5 THEN 'MEDIUM'
-        WHEN TimeScore >= 3 THEN 'LOW'
+        WHEN TimeScore >= 13 THEN 'VERY HIGH'
+        WHEN TimeScore >= 10 THEN 'HIGH'
+        WHEN TimeScore >= 7 THEN 'MEDIUM'
+        WHEN TimeScore >= 4 THEN 'LOW'
         ELSE 'VERY LOW'
     END AS TimePriority
 FROM Scored
