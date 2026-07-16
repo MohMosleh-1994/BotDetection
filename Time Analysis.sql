@@ -81,42 +81,72 @@ MedianCalc AS (
         PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY WindowMinuteHits)
             OVER (PARTITION BY AdminComment, PeakMinuteUtc) AS LocalMedianHits
     FROM LocalWindow
+),
+Metrics AS (
+    -- Preserve the existing peak, local median, and burst calculations.
+    SELECT
+        t.AdminComment,
+        t.TotalRecords,
+        t.RecordsWithValidDate,
+        m.PeakMinuteUtc,
+        m.PeakMinuteHits,
+        CAST(m.LocalMedianHits AS DECIMAL(10,2)) AS LocalMedianHits,
+        CAST(
+            m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0)
+            AS DECIMAL(10,2)
+        ) AS BurstScore
+    FROM CandidateTotals t
+    LEFT JOIN MedianCalc m
+        ON m.AdminComment = t.AdminComment
+),
+ComponentScores AS (
+    SELECT
+        *,
+        CASE
+            WHEN COALESCE(PeakMinuteHits, 0) < 50 THEN 0
+            WHEN PeakMinuteHits < 100 THEN 1
+            WHEN PeakMinuteHits < 200 THEN 2
+            WHEN PeakMinuteHits < 300 THEN 3
+            WHEN PeakMinuteHits < 500 THEN 4
+            ELSE 5
+        END AS PeakVolumeScore,
+        CASE
+            WHEN COALESCE(BurstScore, 0) < 2 THEN 0
+            WHEN BurstScore < 5 THEN 1
+            WHEN BurstScore < 10 THEN 2
+            WHEN BurstScore < 20 THEN 3
+            WHEN BurstScore < 40 THEN 4
+            ELSE 5
+        END AS BurstScoreValue
+    FROM Metrics
+),
+Scored AS (
+    SELECT
+        *,
+        PeakVolumeScore + BurstScoreValue AS TimeScore
+    FROM ComponentScores
 )
 SELECT
-    t.AdminComment,
-    t.TotalRecords,
-    t.RecordsWithValidDate,
-    m.PeakMinuteUtc,
-    m.PeakMinuteHits,
-    CAST(m.LocalMedianHits AS DECIMAL(10,2)) AS LocalMedianHits,
-    CAST(
-        m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0)
-        AS DECIMAL(10,2)
-    ) AS BurstScore,
+    AdminComment,
+    TotalRecords,
+    RecordsWithValidDate,
+    PeakMinuteUtc,
+    PeakMinuteHits,
+    LocalMedianHits,
+    BurstScore,
+    PeakVolumeScore,
+    BurstScoreValue,
+    TimeScore,
     CASE
-        WHEN t.TotalRecords < 100 THEN 'LOW EVIDENCE'
-        WHEN t.RecordsWithValidDate = 0 THEN 'NO VALID DATES'
-        WHEN m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 20
-        THEN 'WORTH CHECKING'
-        WHEN m.PeakMinuteHits >= 100
-          OR m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 10
-        THEN 'MODERATE BURST'
-        ELSE 'LOW BURST'
-    END AS TimeEvidenceDecision
-FROM CandidateTotals t
-LEFT JOIN MedianCalc m
-    ON m.AdminComment = t.AdminComment
+        WHEN TimeScore >= 9 THEN 'VERY HIGH'
+        WHEN TimeScore >= 7 THEN 'HIGH'
+        WHEN TimeScore >= 5 THEN 'MEDIUM'
+        WHEN TimeScore >= 3 THEN 'LOW'
+        ELSE 'VERY LOW'
+    END AS TimePriority
+FROM Scored
 ORDER BY
-    CASE
-        WHEN t.TotalRecords < 100 THEN 4
-        WHEN t.RecordsWithValidDate = 0 THEN 5
-        WHEN m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 20
-        THEN 1
-        WHEN m.PeakMinuteHits >= 100
-          OR m.PeakMinuteHits * 1.0 / NULLIF(m.LocalMedianHits, 0) >= 10
-        THEN 2
-        ELSE 3
-    END,
+    TimeScore DESC,
+    PeakMinuteHits DESC,
     BurstScore DESC,
-    m.PeakMinuteHits DESC,
-    t.TotalRecords DESC;
+    TotalRecords DESC;

@@ -87,9 +87,8 @@ Metrics AS (
 ),
 ComponentScores AS (
     -- Score concentration from 0-5 using gradual coverage bands.
-    -- Score volume from 0-5 using smooth curves for both total traffic and
-    -- top-IP traffic. TopIPRecords receives more weight because it is the
-    -- suspicious volume directly attributable to the leading IP.
+    -- Score volume from 0-5 using simple TopIPRecords ranges, but only when
+    -- there are at least 100 total records for a meaningful sample size.
     SELECT
         AdminComment,
         TotalRecords,
@@ -107,18 +106,26 @@ ComponentScores AS (
             WHEN TopIPCoverageFromValidIPRecordsPercent < 50 THEN 4
             ELSE 5
         END AS IPConcentrationScore,
-        CAST(ROUND(
-            0.40 * (5.0 * TotalRecords / (TotalRecords + 200.0))
-          + 0.60 * (5.0 * TopIPRecords / (TopIPRecords + 50.0)),
-            0
-        ) AS INT) AS IPVolumeScore
+        CASE
+            WHEN TotalRecords < 100 THEN 0
+            WHEN TopIPRecords < 10 THEN 0
+            WHEN TopIPRecords < 25 THEN 1
+            WHEN TopIPRecords < 50 THEN 2
+            WHEN TopIPRecords < 100 THEN 3
+            WHEN TopIPRecords < 200 THEN 4
+            ELSE 5
+        END AS IPVolumeScore
     FROM Metrics
 ),
 Scored AS (
-    -- Combine the two independent components into the final 0-10 score.
+    -- Samples below 100 total records do not receive a meaningful final score.
+    -- Otherwise, combine the two 0-5 components into the final 0-10 score.
     SELECT
         *,
-        IPConcentrationScore + IPVolumeScore AS IPScore
+        CASE
+            WHEN TotalRecords < 100 THEN 0
+            ELSE IPConcentrationScore + IPVolumeScore
+        END AS IPScore
     FROM ComponentScores
 ),
 Final AS (
@@ -128,7 +135,17 @@ Final AS (
             WHEN IPScore >= 8 THEN 'HIGH'
             WHEN IPScore >= 5 THEN 'MEDIUM'
             ELSE 'LOW'
-        END AS IPPriority
+        END AS IPPriority,
+        CASE
+            WHEN TotalRecords < 100 THEN 'Insufficient sample size'
+            WHEN IPConcentrationScore >= 4 AND IPVolumeScore >= 4
+                THEN 'High concentration + High volume'
+            WHEN IPConcentrationScore >= 4 THEN 'High concentration'
+            WHEN IPVolumeScore >= 4 THEN 'High volume'
+            WHEN IPConcentrationScore > IPVolumeScore THEN 'Concentration-driven score'
+            WHEN IPVolumeScore > IPConcentrationScore THEN 'Volume-driven score'
+            ELSE 'Low concentration and volume'
+        END AS IPScoreReason
     FROM Scored
 )
 SELECT
@@ -143,7 +160,8 @@ SELECT
     IPConcentrationScore,
     IPVolumeScore,
     IPScore,
-    IPPriority
+    IPPriority,
+    IPScoreReason
 FROM Final
 ORDER BY
     IPScore DESC,
