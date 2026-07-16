@@ -45,6 +45,35 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
+## SQL Server Settings
+
+The full pipeline uses SQL Server as the only SQL engine. It imports the input
+CSV into `dbo.Results`, executes the repository `.sql` files directly, and
+exports each result set to CSV.
+
+Default connection settings use Windows Authentication:
+
+```text
+BOTDETECTION_SQL_DRIVER=ODBC Driver 17 for SQL Server
+BOTDETECTION_SQL_SERVER=localhost
+BOTDETECTION_SQL_DATABASE=tempdb
+```
+
+For SQL login, set:
+
+```text
+BOTDETECTION_SQL_USERNAME=your-user
+BOTDETECTION_SQL_PASSWORD=your-password
+```
+
+If `dbo.Results` already exists and is not marked as a BotDetection pipeline
+table, the pipeline refuses to overwrite it. For a scratch/local database only,
+set:
+
+```text
+BOTDETECTION_SQL_ALLOW_OVERWRITE_RESULTS=1
+```
+
 ## Run Full Analysis Pipeline
 
 The main entry point is:
