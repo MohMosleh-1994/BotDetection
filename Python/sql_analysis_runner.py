@@ -27,40 +27,124 @@ RESULTS_TABLE = "dbo.Results"
 PIPELINE_MARKER = "BotDetectionPipelineTable"
 INSERT_BATCH_SIZE = 1000
 
+CANONICAL_COLUMN_ALIASES = {
+    "AdminComment": ["AdminComment"],
+    "IPAddress": ["IPAddress", "IpAddress", "LastIpAddress", "LastIPAddress"],
+    "CreatedOnUtc": ["CreatedOnUtc"],
+    "RangeSubnet24": ["RangeSubnet24", "RangesSubnet24"],
+    "RangeSubnet16": ["RangeSubnet16", "RangesSubnet16"],
+    "CleanAdminComment": ["CleanAdminComment"],
+    "RecordCount": ["RecordCount"],
+}
+
+DEFAULT_CANONICAL_COLUMNS = {
+    "IPAddress": "",
+    "CreatedOnUtc": "",
+    "RangeSubnet24": "",
+    "RangeSubnet16": "",
+    "CleanAdminComment": "",
+    "RecordCount": "1",
+}
+REQUIRED_CANONICAL_COLUMNS = {"AdminComment"}
+
 
 def normalize_column_key(column_name: Any) -> str:
     """Normalize a CSV column name for case-insensitive matching."""
     return str(column_name).lstrip("\ufeff").strip().casefold()
 
 
-def find_column(df: pd.DataFrame, aliases: list[str]) -> str | None:
-    """Find a column using case-insensitive aliases."""
-    columns_by_key = {normalize_column_key(column): column for column in df.columns}
-    for alias in aliases:
-        column = columns_by_key.get(normalize_column_key(alias))
-        if column is not None:
-            return column
-    return None
+def canonical_column_name(column_name: Any) -> str:
+    """Return the SQL column name that should represent one CSV column."""
+    cleaned_name = str(column_name).lstrip("\ufeff").strip()
+    normalized_name = normalize_column_key(cleaned_name)
+
+    for canonical_name, aliases in CANONICAL_COLUMN_ALIASES.items():
+        if normalized_name in {normalize_column_key(alias) for alias in aliases}:
+            return canonical_name
+
+    return cleaned_name
 
 
-def ensure_column(
-    df: pd.DataFrame,
+def print_original_columns(columns: list[Any]) -> None:
+    """Print the incoming CSV columns for import debugging."""
+    print("Original CSV columns:")
+    for index, column in enumerate(columns, start=1):
+        print(f"  {index}. {column}")
+
+
+def print_duplicate_column_report(
     canonical_name: str,
-    aliases: list[str],
-    *,
-    required: bool = False,
-    default_value: str = "",
+    kept_column: str,
+    skipped_column: str,
 ) -> None:
-    """Create a canonical column expected by the SQL scripts."""
-    source_column = find_column(df, aliases)
-    if source_column is None:
-        if required:
-            raise ValueError(f"Input CSV is missing required column: {canonical_name}")
-        df[canonical_name] = default_value
-        return
+    """Print a duplicate canonical column diagnostic."""
+    print(
+        "Duplicate canonical column detected: "
+        f"'{skipped_column}' maps to '{canonical_name}' but "
+        f"'{kept_column}' is already used for '{canonical_name}'. "
+        f"Skipping '{skipped_column}'."
+    )
+    if canonical_name == "IPAddress":
+        print(
+            "IPAddress duplicate source: this is where IPAddress would have "
+            f"been created twice ({kept_column} + {skipped_column})."
+        )
 
-    if source_column != canonical_name:
-        df[canonical_name] = df[source_column]
+
+def canonicalize_results_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Canonicalize aliases and remove duplicate SQL column names."""
+    print_original_columns(list(df.columns))
+
+    first_group_order: list[str] = []
+    groups: dict[str, list[dict[str, Any]]] = {}
+
+    for position, original_column in enumerate(df.columns):
+        source_name = str(original_column).lstrip("\ufeff").strip()
+        canonical_name = canonical_column_name(source_name)
+        canonical_key = normalize_column_key(canonical_name)
+        entry = {
+            "position": position,
+            "source": original_column,
+            "source_name": source_name,
+            "canonical": canonical_name,
+            "canonical_key": canonical_key,
+            "is_exact_canonical": source_name == canonical_name,
+        }
+        if canonical_key not in groups:
+            first_group_order.append(canonical_key)
+            groups[canonical_key] = []
+        groups[canonical_key].append(entry)
+
+    selected_entries: list[dict[str, Any]] = []
+    for canonical_key in first_group_order:
+        group = groups[canonical_key]
+        preferred = next((entry for entry in group if entry["is_exact_canonical"]), group[0])
+        selected_entries.append(preferred)
+
+        for entry in group:
+            if entry is preferred:
+                continue
+            print_duplicate_column_report(
+                preferred["canonical"],
+                preferred["source_name"],
+                entry["source_name"],
+            )
+
+    final_df = pd.DataFrame(index=df.index)
+    for entry in selected_entries:
+        final_df[entry["canonical"]] = df.iloc[:, entry["position"]]
+
+    for canonical_name in REQUIRED_CANONICAL_COLUMNS:
+        if canonical_name not in final_df.columns:
+            raise ValueError(f"Input CSV is missing required column: {canonical_name}")
+
+    for canonical_name, default_value in DEFAULT_CANONICAL_COLUMNS.items():
+        if canonical_name not in final_df.columns:
+            final_df[canonical_name] = default_value
+
+    validate_unique_sql_columns(final_df.columns)
+    print_final_table_schema(final_df.columns)
+    return final_df
 
 
 def load_results_dataframe(input_path: Path) -> pd.DataFrame:
@@ -70,15 +154,7 @@ def load_results_dataframe(input_path: Path) -> pd.DataFrame:
     except CsvAnalysisError as exc:
         raise ValueError(str(exc)) from exc
 
-    df = df.copy()
-    ensure_column(df, "AdminComment", ["AdminComment"], required=True)
-    ensure_column(df, "IPAddress", ["IPAddress", "IpAddress", "LastIpAddress"], default_value="")
-    ensure_column(df, "CreatedOnUtc", ["CreatedOnUtc"], default_value="")
-    ensure_column(df, "RangeSubnet24", ["RangeSubnet24", "RangesSubnet24"], default_value="")
-    ensure_column(df, "RangeSubnet16", ["RangeSubnet16", "RangesSubnet16"], default_value="")
-    ensure_column(df, "CleanAdminComment", ["CleanAdminComment"], default_value="")
-    ensure_column(df, "RecordCount", ["RecordCount"], default_value="1")
-    return df
+    return canonicalize_results_columns(df.copy())
 
 
 def sql_bool_env(name: str, default: bool = False) -> bool:
@@ -120,6 +196,27 @@ def build_connection_string() -> str:
 def quote_identifier(identifier: str) -> str:
     """Quote a SQL Server identifier."""
     return "[" + str(identifier).replace("]", "]]") + "]"
+
+
+def validate_unique_sql_columns(columns: Any) -> None:
+    """Ensure SQL Server will receive unique column names."""
+    seen: dict[str, str] = {}
+    for column in columns:
+        column_name = str(column)
+        column_key = normalize_column_key(column_name)
+        if column_key in seen:
+            raise ValueError(
+                "Duplicate SQL column after canonicalization: "
+                f"'{seen[column_key]}' and '{column_name}'"
+            )
+        seen[column_key] = column_name
+
+
+def print_final_table_schema(columns: Any) -> None:
+    """Print the SQL Server table schema before creating dbo.Results."""
+    print("Final SQL Results table schema:")
+    for index, column in enumerate(columns, start=1):
+        print(f"  {index}. {quote_identifier(str(column))} nvarchar(max) NULL")
 
 
 def is_pipeline_results_table(cursor: Any) -> bool:
@@ -173,6 +270,7 @@ def add_results_table_marker(cursor: Any) -> None:
 
 def create_results_table(cursor: Any, df: pd.DataFrame) -> None:
     """Create dbo.Results with text columns matching the CSV headers."""
+    validate_unique_sql_columns(df.columns)
     columns_sql = ",\n        ".join(
         f"{quote_identifier(column)} nvarchar(max) NULL" for column in df.columns
     )
