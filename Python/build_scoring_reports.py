@@ -28,11 +28,48 @@ SCORE_COLUMNS = [
     "TimeScore",
     "IPScore",
     "Subnet24Score",
-    "VolumeScore",
     "UAStructureScore",
 ]
 
 REVIEW_DECISIONS = {"REVIEW", "HIGH", "CRITICAL"}
+
+FINAL_REPORT_COLUMNS = [
+    "AdminComment",
+    "RecordCount",
+    "UniqueIPs",
+    "UniqueSubnet24",
+    "FirstSeenUtc",
+    "LastSeenUtc",
+    "ActiveMinutes",
+    "PeakMinuteUtc",
+    "PeakMinuteHits",
+    "LocalMedianHits",
+    "BurstScore",
+    "TimeScore",
+    "TimePriority",
+    "TopIPAddress",
+    "TopIPRecords",
+    "TopIPCoverageFromValidIPRecordsPercent",
+    "IPScore",
+    "IPPriority",
+    "IPScoreReason",
+    "TopSubnet24",
+    "TopSubnet24Records",
+    "TopSubnet24CoverageFromValidSubnet24RecordsPercent",
+    "Subnet24Score",
+    "Subnet24EvidenceDecision",
+    "BrowserFamily",
+    "BrowserVersion",
+    "OSFamily",
+    "OSVersion",
+    "DeviceFamily",
+    "UAStructureDecision",
+    "UAReason",
+    "UAStructureScore",
+    "SuspicionScore",
+    "FinalDecision",
+    "ScoreReasons",
+]
 
 
 @dataclass
@@ -92,11 +129,11 @@ def ensure_score_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def final_decision(score: int) -> str:
     """Convert total score into the final review bucket."""
-    if score <= 24:
+    if score <= 9:
         return "LOW"
-    if score <= 49:
+    if score <= 19:
         return "REVIEW"
-    if score <= 74:
+    if score <= 29:
         return "HIGH"
     return "CRITICAL"
 
@@ -113,10 +150,9 @@ def reason_value(row: pd.Series, *columns: str, fallback: str = "MISSING") -> st
 def build_score_reasons(row: pd.Series) -> str:
     """Describe how the final score was assembled."""
     return (
-        f"Time={reason_value(row, 'TimePriority', 'TimeDecision')}({int(row['TimeScore'])}); "
-        f"IP={reason_value(row, 'IPPriority', 'IPEvidenceDecision')}({int(row['IPScore'])}); "
-        f"/24={reason_value(row, 'Subnet24EvidenceDecision')}({int(row['Subnet24Score'])}); "
-        f"Volume={int(row['VolumeScore'])}; "
+        f"Time={reason_value(row, 'TimePriority')}({int(row['TimeScore'])}); "
+        f"IP={reason_value(row, 'IPPriority')}({int(row['IPScore'])}); "
+        f"Subnet24={reason_value(row, 'Subnet24EvidenceDecision')}({int(row['Subnet24Score'])}); "
         f"UA={reason_value(row, 'UAStructureDecision')}({int(row['UAStructureScore'])})"
     )
 
@@ -173,14 +209,10 @@ def build_per_user_agent_reports(
 
     time_columns = [
         "AdminComment",
-        "TotalRecords",
-        "RecordsWithValidDate",
         "PeakMinuteUtc",
         "PeakMinuteHits",
         "LocalMedianHits",
         "BurstScore",
-        "PeakVolumeScore",
-        "BurstScoreValue",
         "TimeScore",
         "TimePriority",
     ]
@@ -189,21 +221,16 @@ def build_per_user_agent_reports(
         "RecordsWithIP",
         "TopIPAddress",
         "TopIPRecords",
-        "TopIPCoverageFromTotalRecordsPercent",
         "TopIPCoverageFromValidIPRecordsPercent",
-        "IPConcentrationScore",
-        "IPVolumeScore",
         "IPScore",
         "IPPriority",
         "IPScoreReason",
-        "IPEvidenceDecision",
     ]
     subnet24_columns = [
         "AdminComment",
         "RecordsWithSubnet24",
         "TopSubnet24",
         "TopSubnet24Records",
-        "TopSubnet24CoverageFromTotalRecordsPercent",
         "TopSubnet24CoverageFromValidSubnet24RecordsPercent",
         "Subnet24Score",
         "Subnet24EvidenceDecision",
@@ -239,6 +266,7 @@ def build_per_user_agent_reports(
     final_report["FinalDecision"] = final_report["SuspicionScore"].map(final_decision)
     final_report["ScoreReasons"] = final_report.apply(build_score_reasons, axis=1)
     final_report = sort_report(final_report)
+    final_report = final_report.reindex(columns=FINAL_REPORT_COLUMNS)
 
     review_queue = final_report.loc[
         final_report["FinalDecision"].isin(REVIEW_DECISIONS)

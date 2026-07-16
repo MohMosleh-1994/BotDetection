@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from pipeline_common import normalize_count_columns, volume_score
+from pipeline_common import normalize_count_columns
 
 
 CANDIDATE_SUMMARY_COLUMNS = [
@@ -16,7 +16,6 @@ CANDIDATE_SUMMARY_COLUMNS = [
     "FirstSeenUtc",
     "LastSeenUtc",
     "ActiveMinutes",
-    "VolumeScore",
 ]
 
 
@@ -45,11 +44,9 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
         summary["FirstSeenUtc"].isna() | summary["LastSeenUtc"].isna(),
         "ActiveMinutes",
     ] = pd.NA
-    summary["VolumeScore"] = summary["RecordCount"].map(volume_score)
-
     summary = normalize_count_columns(
         summary,
-        ["RecordCount", "UniqueIPs", "UniqueSubnet24", "UniqueSubnet16", "VolumeScore"],
+        ["RecordCount", "UniqueIPs", "UniqueSubnet24", "UniqueSubnet16"],
     )
     return summary[CANDIDATE_SUMMARY_COLUMNS].sort_values(
         by=["RecordCount", "UniqueIPs", "UniqueSubnet24", "ActiveMinutes"],

@@ -92,6 +92,15 @@ The full pipeline writes these output files into the timestamped output folder:
 - `Global_Investigation_Report.csv`
 - `Run_Summary.txt`
 
+The final `SuspicionScore` does not include `RecordCount` or `VolumeScore`.
+It is calculated as:
+
+```text
+TimeScore + IPScore + Subnet24Score + UAStructureScore
+```
+
+The maximum score is 45.
+
 ## Run User-Agent CSV Analysis
 
 Example input:

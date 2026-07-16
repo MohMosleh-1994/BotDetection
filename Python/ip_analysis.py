@@ -21,7 +21,6 @@ IP_ANALYSIS_COLUMNS = [
     "IPScore",
     "IPPriority",
     "IPScoreReason",
-    "IPEvidenceDecision",
 ]
 
 
@@ -62,32 +61,6 @@ def ip_priority(score: int) -> str:
     if score >= 5:
         return "MEDIUM"
     return "LOW"
-
-
-def ip_score_reason(row: pd.Series) -> str:
-    """Explain what drove the IP score."""
-    if row["TotalRecords"] < 100:
-        return "Insufficient sample size"
-    if row["IPConcentrationScore"] >= 4 and row["IPVolumeScore"] >= 4:
-        return "High concentration + High volume"
-    if row["IPConcentrationScore"] >= 4:
-        return "High concentration"
-    if row["IPVolumeScore"] >= 4:
-        return "High volume"
-    if row["IPConcentrationScore"] > row["IPVolumeScore"]:
-        return "Concentration-driven score"
-    if row["IPVolumeScore"] > row["IPConcentrationScore"]:
-        return "Volume-driven score"
-    return "Low concentration and volume"
-
-
-def ip_evidence_decision(row: pd.Series) -> str:
-    """Keep the earlier evidence label for review compatibility."""
-    if row["TotalRecords"] < 100 and row["UniqueIPs"] < 100:
-        return "LOW EVIDENCE"
-    if row["TopIPCoverageFromValidIPRecordsPercent"] >= 20:
-        return "WORTH CHECKING"
-    return "LOW IP CONCENTRATION"
 
 
 def analyze(rows: pd.DataFrame) -> pd.DataFrame:
@@ -140,11 +113,34 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
         "TopIPCoverageFromValidIPRecordsPercent"
     ].map(ip_concentration_score)
     result["IPVolumeScore"] = result["TopIPRecords"].map(ip_volume_score)
-    result.loc[result["TotalRecords"] < 100, ["IPConcentrationScore", "IPVolumeScore"]] = 0
+    insufficient_sample = result["TotalRecords"] < 100
+    no_meaningful_concentration = (
+        (result["IPConcentrationScore"] == 0)
+        | (result["TopIPCoverageFromValidIPRecordsPercent"] < 5)
+    )
+
+    result.loc[insufficient_sample, ["IPConcentrationScore", "IPVolumeScore"]] = 0
     result["IPScore"] = result["IPConcentrationScore"] + result["IPVolumeScore"]
+    result.loc[insufficient_sample | no_meaningful_concentration, "IPScore"] = 0
     result["IPPriority"] = result["IPScore"].map(ip_priority)
-    result["IPScoreReason"] = result.apply(ip_score_reason, axis=1)
-    result["IPEvidenceDecision"] = result.apply(ip_evidence_decision, axis=1)
+
+    result["IPScoreReason"] = "Moderate IP concentration"
+    result.loc[
+        result["IPConcentrationScore"] >= 4,
+        "IPScoreReason",
+    ] = "High IP concentration"
+    result.loc[
+        (result["IPConcentrationScore"] >= 4) & (result["IPVolumeScore"] >= 4),
+        "IPScoreReason",
+    ] = "High IP concentration + high IP volume"
+    result.loc[
+        no_meaningful_concentration,
+        "IPScoreReason",
+    ] = "No meaningful IP concentration"
+    result.loc[
+        insufficient_sample,
+        "IPScoreReason",
+    ] = "Insufficient sample size"
 
     result = normalize_count_columns(
         result,

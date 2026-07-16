@@ -178,21 +178,6 @@ def normalize_count_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFram
     return df
 
 
-def volume_score(record_count: float) -> int:
-    """Score candidate traffic volume from 0 to 15."""
-    if record_count < 100:
-        return 0
-    if record_count < 500:
-        return 3
-    if record_count < 2000:
-        return 6
-    if record_count < 10000:
-        return 9
-    if record_count < 40000:
-        return 12
-    return 15
-
-
 def load_and_prepare_results(input_path: Path) -> PreparedInput:
     """Read Results.csv once, normalize columns, and prepare reusable fields."""
     try:

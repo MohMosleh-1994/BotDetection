@@ -48,6 +48,9 @@ candidate should continue or stop.
 Analysts use this ranked table to choose which User-Agent values should be
 investigated first.
 
+`RecordCount` is a ranking/context metric only. It is not suspicion evidence and
+is not included in the final score.
+
 ## Per-User-Agent Analyses
 
 Time Analysis, Per-UA IP Analysis, and Per-UA /24 Analysis all use
@@ -60,3 +63,18 @@ can be reviewed alongside the candidate ranking output.
 
 Global IP, global /24, and global /16 analyses remain independent. They use the
 same prepared DataFrame and are not part of the per-User-Agent ranking stage.
+
+## Final Scoring
+
+`SuspicionScore` uses only per-User-Agent evidence scores:
+
+```text
+SuspicionScore = TimeScore + IPScore + Subnet24Score + UAStructureScore
+```
+
+The maximum score is 45. Final decisions use:
+
+- `0 to 9`: `LOW`
+- `10 to 19`: `REVIEW`
+- `20 to 29`: `HIGH`
+- `30 to 45`: `CRITICAL`

@@ -105,6 +105,9 @@ Do not use `CleanAdminComment` in this module.
 
 Do not calculate any candidate decision value.
 
+`RecordCount` is used for ranking and analyst context only. It is not included
+in `SuspicionScore`.
+
 ## 01_Coverage_Analysis.sql
 
 ### Purpose
@@ -208,7 +211,6 @@ If `IPAddress` contains multiple IPs separated by comma, use only the first IP.
 - `IPScore`
 - `IPPriority`
 - `IPScoreReason`
-- `IPEvidenceDecision`
 
 ### Scoring Logic
 
@@ -221,7 +223,9 @@ Otherwise:
 
 - calculate `IPConcentrationScore` from 0 to 5
 - calculate `IPVolumeScore` from 0 to 5 using `TopIPRecords`
-- `IPScore = IPConcentrationScore + IPVolumeScore`
+- if coverage is less than 5%, `IPScore = 0` and the reason is
+  `No meaningful IP concentration`
+- otherwise, `IPScore = IPConcentrationScore + IPVolumeScore`
 
 ### Important
 
@@ -250,12 +254,19 @@ is `Python/subnet24_analysis.py`.
 - `TopSubnet24CoverageFromTotalRecordsPercent`
 - `TopSubnet24CoverageFromValidSubnet24RecordsPercent`
 - `Subnet24EvidenceDecision`
+- `Subnet24Score`
 
 ### Decision Logic
 
 - `LOW EVIDENCE` if `TotalRecords < 100` AND `UniqueSubnet24 < 100`
 - `WORTH CHECKING` if `TopSubnet24CoverageFromValidSubnet24RecordsPercent >= 20`
 - `LOW /24 CONCENTRATION` otherwise
+
+### Temporary Score Mapping
+
+- `WORTH CHECKING` = 10
+- `LOW /24 CONCENTRATION` = 0
+- `LOW EVIDENCE` = 0
 
 ### Invalid /24 Values
 
@@ -293,8 +304,21 @@ Browscap wildcard generation.
 
 The active final scoring report combines evidence from:
 
-- User-Agent Candidate Ranking volume and coverage context
 - Time/Burst behavior
 - Network concentration
 - Representative User-Agent stability
 - False-positive risk remains a human-review consideration.
+
+Candidate Ranking volume and spread fields are ranking/context only. They are
+not part of `SuspicionScore`.
+
+`SuspicionScore = TimeScore + IPScore + Subnet24Score + UAStructureScore`
+
+Maximum `SuspicionScore` is 45.
+
+Final decision ranges:
+
+- `0 to 9` = `LOW`
+- `10 to 19` = `REVIEW`
+- `20 to 29` = `HIGH`
+- `30 to 45` = `CRITICAL`

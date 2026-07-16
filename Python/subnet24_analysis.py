@@ -9,7 +9,7 @@ from pipeline_common import normalize_count_columns, safe_percent
 
 SUBNET24_SCORE_BY_DECISION = {
     "WORTH CHECKING": 10,
-    "LOW /24 CONCENTRATION": 5,
+    "LOW /24 CONCENTRATION": 0,
     "LOW EVIDENCE": 0,
 }
 
@@ -101,13 +101,15 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
             "Subnet24Score",
         ],
     )
-    decision_priority = {"WORTH CHECKING": 1, "LOW /24 CONCENTRATION": 2, "LOW EVIDENCE": 3}
-    result["_DecisionPriority"] = result["Subnet24EvidenceDecision"].map(decision_priority).fillna(4)
     return (
         result.sort_values(
-            by=["_DecisionPriority", "TopSubnet24CoverageFromValidSubnet24RecordsPercent"],
-            ascending=[True, False],
+            by=[
+                "Subnet24Score",
+                "TopSubnet24CoverageFromValidSubnet24RecordsPercent",
+                "TopSubnet24Records",
+                "TotalRecords",
+            ],
+            ascending=[False, False, False, False],
         )
-        .drop(columns=["_DecisionPriority"])
         .loc[:, SUBNET24_ANALYSIS_COLUMNS]
     )
