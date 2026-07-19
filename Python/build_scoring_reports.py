@@ -28,7 +28,6 @@ SCORE_COLUMNS = [
     "TimeScore",
     "IPScore",
     "Subnet24Score",
-    "UAStructureScore",
 ]
 
 REVIEW_DECISIONS = {"REVIEW", "HIGH", "CRITICAL"}
@@ -65,7 +64,6 @@ FINAL_REPORT_COLUMNS = [
     "DeviceFamily",
     "UAStructureDecision",
     "UAReason",
-    "UAStructureScore",
     "SuspicionScore",
     "FinalDecision",
     "ScoreReasons",
@@ -129,11 +127,11 @@ def ensure_score_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def final_decision(score: int) -> str:
     """Convert total score into the final review bucket."""
-    if score <= 9:
+    if score <= 7:
         return "LOW"
-    if score <= 19:
+    if score <= 15:
         return "REVIEW"
-    if score <= 29:
+    if score <= 25:
         return "HIGH"
     return "CRITICAL"
 
@@ -153,7 +151,7 @@ def build_score_reasons(row: pd.Series) -> str:
         f"Time={reason_value(row, 'TimePriority')}({int(row['TimeScore'])}); "
         f"IP={reason_value(row, 'IPPriority')}({int(row['IPScore'])}); "
         f"Subnet24={reason_value(row, 'Subnet24EvidenceDecision')}({int(row['Subnet24Score'])}); "
-        f"UA={reason_value(row, 'UAStructureDecision')}({int(row['UAStructureScore'])})"
+        f"UA={reason_value(row, 'UAStructureDecision')}"
     )
 
 
@@ -183,7 +181,6 @@ def sort_report(df: pd.DataFrame) -> pd.DataFrame:
         "TimeScore",
         "IPScore",
         "Subnet24Score",
-        "UAStructureScore",
     ]
     for column in sort_columns:
         df[f"_Sort_{column}"] = numeric_column(df, column)
@@ -244,7 +241,6 @@ def build_per_user_agent_reports(
         "DeviceFamily",
         "UAStructureDecision",
         "UAReason",
-        "UAStructureScore",
     ]
 
     merge_specs = [

@@ -92,14 +92,16 @@ The full pipeline writes these output files into the timestamped output folder:
 - `Global_Investigation_Report.csv`
 - `Run_Summary.txt`
 
-The final `SuspicionScore` does not include `RecordCount` or `VolumeScore`.
+The final `SuspicionScore` does not include `RecordCount`, `VolumeScore`, or
+`UAStructureScore`.
 It is calculated as:
 
 ```text
-TimeScore + IPScore + Subnet24Score + UAStructureScore
+TimeScore + IPScore + Subnet24Score
 ```
 
-The maximum score is 45.
+The maximum score is 35. User-Agent structure fields remain visible for analyst
+context, but they do not increase suspicion by themselves.
 
 ## Run User-Agent CSV Analysis
 

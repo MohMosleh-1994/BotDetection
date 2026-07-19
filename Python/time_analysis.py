@@ -132,17 +132,23 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
 
     result = totals.merge(median, on="AdminComment", how="left")
     result["BurstScore"] = safe_ratio(result["PeakMinuteHits"], result["LocalMedianHits"])
-    result["PeakVolumeScore"] = (
-        pd.to_numeric(result["PeakMinuteHits"], errors="coerce")
-        .fillna(0)
-        .map(peak_volume_score)
+    result["PeakVolumeScore"] = 0
+    result["BurstScoreValue"] = 0
+    result["TimeScore"] = 0
+
+    eligible_sample = result["TotalRecords"] >= 100
+    peak_hits = pd.to_numeric(result["PeakMinuteHits"], errors="coerce").fillna(0)
+    burst_scores = pd.to_numeric(result["BurstScore"], errors="coerce").fillna(0)
+    result.loc[eligible_sample, "PeakVolumeScore"] = peak_hits.loc[
+        eligible_sample
+    ].map(peak_volume_score)
+    result.loc[eligible_sample, "BurstScoreValue"] = burst_scores.loc[
+        eligible_sample
+    ].map(burst_score_value)
+    result.loc[eligible_sample, "TimeScore"] = (
+        result.loc[eligible_sample, "PeakVolumeScore"]
+        + result.loc[eligible_sample, "BurstScoreValue"]
     )
-    result["BurstScoreValue"] = (
-        pd.to_numeric(result["BurstScore"], errors="coerce")
-        .fillna(0)
-        .map(burst_score_value)
-    )
-    result["TimeScore"] = result["PeakVolumeScore"] + result["BurstScoreValue"]
     result["TimePriority"] = result["TimeScore"].map(time_priority)
 
     result = normalize_count_columns(

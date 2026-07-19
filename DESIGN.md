@@ -69,12 +69,16 @@ same prepared DataFrame and are not part of the per-User-Agent ranking stage.
 `SuspicionScore` uses only per-User-Agent evidence scores:
 
 ```text
-SuspicionScore = TimeScore + IPScore + Subnet24Score + UAStructureScore
+SuspicionScore = TimeScore + IPScore + Subnet24Score
 ```
 
-The maximum score is 45. Final decisions use:
+User-Agent structure analysis remains visible in the reports as a quality and
+completeness check, but it is not direct suspicion evidence and does not add to
+`SuspicionScore`.
 
-- `0 to 9`: `LOW`
-- `10 to 19`: `REVIEW`
-- `20 to 29`: `HIGH`
-- `30 to 45`: `CRITICAL`
+The maximum score is 35. Final decisions use:
+
+- `0 to 7`: `LOW`
+- `8 to 15`: `REVIEW`
+- `16 to 25`: `HIGH`
+- `26 to 35`: `CRITICAL`

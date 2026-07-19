@@ -179,6 +179,9 @@ suddenly spike in a specific minute.
 
 Maximum `TimeScore` is 15.
 
+If `TotalRecords < 100`, set `TimeScore = 0` because the sample is too small
+to produce reliable evidence.
+
 ### Important
 
 The analysis should use minute-level grouping based on `CreatedOnUtc`.
@@ -312,13 +315,17 @@ The active final scoring report combines evidence from:
 Candidate Ranking volume and spread fields are ranking/context only. They are
 not part of `SuspicionScore`.
 
-`SuspicionScore = TimeScore + IPScore + Subnet24Score + UAStructureScore`
+User-Agent structure analysis remains visible in the reports as a quality and
+completeness check. It is not direct suspicion evidence and does not add to
+`SuspicionScore`.
 
-Maximum `SuspicionScore` is 45.
+`SuspicionScore = TimeScore + IPScore + Subnet24Score`
+
+Maximum `SuspicionScore` is 35.
 
 Final decision ranges:
 
-- `0 to 9` = `LOW`
-- `10 to 19` = `REVIEW`
-- `20 to 29` = `HIGH`
-- `30 to 45` = `CRITICAL`
+- `0 to 7` = `LOW`
+- `8 to 15` = `REVIEW`
+- `16 to 25` = `HIGH`
+- `26 to 35` = `CRITICAL`

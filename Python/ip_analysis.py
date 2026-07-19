@@ -109,19 +109,32 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
     result["TopIPCoverageFromValidIPRecordsPercent"] = safe_percent(
         result["TopIPRecords"], result["RecordsWithIP"]
     )
-    result["IPConcentrationScore"] = result[
-        "TopIPCoverageFromValidIPRecordsPercent"
+    result["IPConcentrationScore"] = 0
+    result["IPVolumeScore"] = 0
+    result["IPScore"] = 0
+
+    eligible_sample = result["TotalRecords"] >= 100
+    result.loc[eligible_sample, "IPConcentrationScore"] = result.loc[
+        eligible_sample,
+        "TopIPCoverageFromValidIPRecordsPercent",
     ].map(ip_concentration_score)
-    result["IPVolumeScore"] = result["TopIPRecords"].map(ip_volume_score)
-    insufficient_sample = result["TotalRecords"] < 100
+    result.loc[eligible_sample, "IPVolumeScore"] = result.loc[
+        eligible_sample,
+        "TopIPRecords",
+    ].map(ip_volume_score)
     no_meaningful_concentration = (
-        (result["IPConcentrationScore"] == 0)
-        | (result["TopIPCoverageFromValidIPRecordsPercent"] < 5)
+        eligible_sample
+        & (
+            (result["IPConcentrationScore"] == 0)
+            | (result["TopIPCoverageFromValidIPRecordsPercent"] < 5)
+        )
     )
 
-    result.loc[insufficient_sample, ["IPConcentrationScore", "IPVolumeScore"]] = 0
-    result["IPScore"] = result["IPConcentrationScore"] + result["IPVolumeScore"]
-    result.loc[insufficient_sample | no_meaningful_concentration, "IPScore"] = 0
+    scoreable_sample = eligible_sample & ~no_meaningful_concentration
+    result.loc[scoreable_sample, "IPScore"] = (
+        result.loc[scoreable_sample, "IPConcentrationScore"]
+        + result.loc[scoreable_sample, "IPVolumeScore"]
+    )
     result["IPPriority"] = result["IPScore"].map(ip_priority)
 
     result["IPScoreReason"] = "Moderate IP concentration"
@@ -138,7 +151,7 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
         "IPScoreReason",
     ] = "No meaningful IP concentration"
     result.loc[
-        insufficient_sample,
+        ~eligible_sample,
         "IPScoreReason",
     ] = "Insufficient sample size"
 

@@ -87,8 +87,12 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
         result["TopSubnet24Records"], result["RecordsWithSubnet24"]
     )
     result["Subnet24EvidenceDecision"] = result.apply(subnet24_decision, axis=1)
-    result["Subnet24Score"] = (
-        result["Subnet24EvidenceDecision"].map(SUBNET24_SCORE_BY_DECISION).fillna(0)
+    result["Subnet24Score"] = 0
+    eligible_sample = result["TotalRecords"] >= 100
+    result.loc[eligible_sample, "Subnet24Score"] = (
+        result.loc[eligible_sample, "Subnet24EvidenceDecision"]
+        .map(SUBNET24_SCORE_BY_DECISION)
+        .fillna(0)
     )
 
     result = normalize_count_columns(
