@@ -7,33 +7,64 @@ import pandas as pd
 from pipeline_common import normalize_count_columns, safe_percent
 
 
-SUBNET24_SCORE_BY_DECISION = {
-    "WORTH CHECKING": 10,
-    "LOW /24 CONCENTRATION": 0,
-    "LOW EVIDENCE": 0,
-}
+MIN_VALID_SUBNET24_RECORDS = 200
+MIN_VALID_SUBNET24_DATA_COVERAGE_PERCENT = 20.0
+
+SUBNET24_CONCENTRATION_THRESHOLD_1 = 20.0
+SUBNET24_CONCENTRATION_THRESHOLD_2 = 30.0
+SUBNET24_CONCENTRATION_THRESHOLD_3 = 40.0
+SUBNET24_CONCENTRATION_THRESHOLD_4 = 55.0
+SUBNET24_CONCENTRATION_THRESHOLD_5 = 70.0
+
+SUBNET24_SCORE_1 = 0
+SUBNET24_SCORE_2 = 2
+SUBNET24_SCORE_3 = 4
+SUBNET24_SCORE_4 = 6
+SUBNET24_SCORE_5 = 8
+SUBNET24_SCORE_6 = 10
+
+SUBNET24_PRIORITY_HIGH_MIN_SCORE = SUBNET24_SCORE_5
+SUBNET24_PRIORITY_MEDIUM_MIN_SCORE = SUBNET24_SCORE_3
 
 SUBNET24_ANALYSIS_COLUMNS = [
     "AdminComment",
     "TotalRecords",
     "RecordsWithSubnet24",
+    "Subnet24DataCompletenessPercent",
     "UniqueSubnet24",
     "TopSubnet24",
     "TopSubnet24Records",
     "TopSubnet24CoverageFromTotalRecordsPercent",
     "TopSubnet24CoverageFromValidSubnet24RecordsPercent",
-    "Subnet24EvidenceDecision",
     "Subnet24Score",
+    "Subnet24Priority",
+    "Subnet24EvidenceDecision",
+    "Subnet24ScoreReason",
 ]
 
 
-def subnet24_decision(row: pd.Series) -> str:
-    """Assign the /24 concentration evidence label."""
-    if row["TotalRecords"] < 100 and row["UniqueSubnet24"] < 100:
-        return "LOW EVIDENCE"
-    if row["TopSubnet24CoverageFromValidSubnet24RecordsPercent"] >= 20:
-        return "WORTH CHECKING"
-    return "LOW /24 CONCENTRATION"
+def subnet24_score(concentration_percent: float) -> int:
+    """Score top-/24 concentration from 0 to 10."""
+    if concentration_percent < SUBNET24_CONCENTRATION_THRESHOLD_1:
+        return SUBNET24_SCORE_1
+    if concentration_percent < SUBNET24_CONCENTRATION_THRESHOLD_2:
+        return SUBNET24_SCORE_2
+    if concentration_percent < SUBNET24_CONCENTRATION_THRESHOLD_3:
+        return SUBNET24_SCORE_3
+    if concentration_percent < SUBNET24_CONCENTRATION_THRESHOLD_4:
+        return SUBNET24_SCORE_4
+    if concentration_percent < SUBNET24_CONCENTRATION_THRESHOLD_5:
+        return SUBNET24_SCORE_5
+    return SUBNET24_SCORE_6
+
+
+def subnet24_priority(score: int) -> str:
+    """Convert /24 score into a priority label."""
+    if score >= SUBNET24_PRIORITY_HIGH_MIN_SCORE:
+        return "HIGH"
+    if score >= SUBNET24_PRIORITY_MEDIUM_MIN_SCORE:
+        return "MEDIUM"
+    return "LOW"
 
 
 def analyze(rows: pd.DataFrame) -> pd.DataFrame:
@@ -54,6 +85,9 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
             UniqueSubnet24=("ValidSubnet24", "nunique"),
         )
         .reset_index()
+    )
+    totals["Subnet24DataCompletenessPercent"] = safe_percent(
+        totals["RecordsWithSubnet24"], totals["TotalRecords"]
     )
 
     valid_subnets = working.loc[working["ValidSubnet24"].notna()]
@@ -86,14 +120,56 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
     result["TopSubnet24CoverageFromValidSubnet24RecordsPercent"] = safe_percent(
         result["TopSubnet24Records"], result["RecordsWithSubnet24"]
     )
-    result["Subnet24EvidenceDecision"] = result.apply(subnet24_decision, axis=1)
     result["Subnet24Score"] = 0
-    eligible_sample = result["TotalRecords"] >= 100
-    result.loc[eligible_sample, "Subnet24Score"] = (
-        result.loc[eligible_sample, "Subnet24EvidenceDecision"]
-        .map(SUBNET24_SCORE_BY_DECISION)
-        .fillna(0)
+
+    sufficient_subnet24_evidence = (
+        (result["RecordsWithSubnet24"] >= MIN_VALID_SUBNET24_RECORDS)
+        & (
+            result["Subnet24DataCompletenessPercent"]
+            >= MIN_VALID_SUBNET24_DATA_COVERAGE_PERCENT
+        )
     )
+    result.loc[sufficient_subnet24_evidence, "Subnet24Score"] = (
+        result.loc[
+            sufficient_subnet24_evidence,
+            "TopSubnet24CoverageFromValidSubnet24RecordsPercent",
+        ].map(subnet24_score)
+    )
+    result["Subnet24Priority"] = result["Subnet24Score"].map(subnet24_priority)
+    result["Subnet24EvidenceDecision"] = "INSUFFICIENT SUBNET24 EVIDENCE"
+    result["Subnet24ScoreReason"] = "Insufficient subnet evidence"
+
+    low_concentration = (
+        sufficient_subnet24_evidence
+        & (result["Subnet24Score"] == SUBNET24_SCORE_1)
+    )
+    moderate_concentration = sufficient_subnet24_evidence & result[
+        "Subnet24Score"
+    ].isin([SUBNET24_SCORE_2, SUBNET24_SCORE_3])
+    high_concentration = sufficient_subnet24_evidence & result[
+        "Subnet24Score"
+    ].isin([SUBNET24_SCORE_4, SUBNET24_SCORE_5])
+    very_high_concentration = (
+        sufficient_subnet24_evidence
+        & (result["Subnet24Score"] == SUBNET24_SCORE_6)
+    )
+
+    result.loc[
+        low_concentration,
+        ["Subnet24EvidenceDecision", "Subnet24ScoreReason"],
+    ] = ["LOW /24 CONCENTRATION", "Low /24 concentration"]
+    result.loc[
+        moderate_concentration,
+        ["Subnet24EvidenceDecision", "Subnet24ScoreReason"],
+    ] = ["MODERATE /24 CONCENTRATION", "Moderate /24 concentration"]
+    result.loc[
+        high_concentration,
+        ["Subnet24EvidenceDecision", "Subnet24ScoreReason"],
+    ] = ["HIGH /24 CONCENTRATION", "High /24 concentration"]
+    result.loc[
+        very_high_concentration,
+        ["Subnet24EvidenceDecision", "Subnet24ScoreReason"],
+    ] = ["VERY HIGH /24 CONCENTRATION", "Very high /24 concentration"]
 
     result = normalize_count_columns(
         result,

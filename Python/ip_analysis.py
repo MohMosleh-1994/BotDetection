@@ -7,10 +7,45 @@ import pandas as pd
 from pipeline_common import normalize_count_columns, safe_percent
 
 
+MIN_VALID_IP_RECORDS = 50
+MIN_VALID_IP_DATA_COVERAGE_PERCENT = 20.0
+
+IP_MEANINGFUL_CONCENTRATION_PERCENT = 5.0
+
+IP_CONCENTRATION_THRESHOLD_1 = 5.0
+IP_CONCENTRATION_THRESHOLD_2 = 10.0
+IP_CONCENTRATION_THRESHOLD_3 = 20.0
+IP_CONCENTRATION_THRESHOLD_4 = 30.0
+IP_CONCENTRATION_THRESHOLD_5 = 50.0
+
+IP_CONCENTRATION_SCORE_1 = 0
+IP_CONCENTRATION_SCORE_2 = 1
+IP_CONCENTRATION_SCORE_3 = 2
+IP_CONCENTRATION_SCORE_4 = 3
+IP_CONCENTRATION_SCORE_5 = 4
+IP_CONCENTRATION_SCORE_6 = 5
+
+IP_VOLUME_THRESHOLD_1 = 10
+IP_VOLUME_THRESHOLD_2 = 25
+IP_VOLUME_THRESHOLD_3 = 50
+IP_VOLUME_THRESHOLD_4 = 100
+IP_VOLUME_THRESHOLD_5 = 200
+
+IP_VOLUME_SCORE_1 = 0
+IP_VOLUME_SCORE_2 = 1
+IP_VOLUME_SCORE_3 = 2
+IP_VOLUME_SCORE_4 = 3
+IP_VOLUME_SCORE_5 = 4
+IP_VOLUME_SCORE_6 = 5
+
+IP_PRIORITY_HIGH_MIN_SCORE = 8
+IP_PRIORITY_MEDIUM_MIN_SCORE = 5
+
 IP_ANALYSIS_COLUMNS = [
     "AdminComment",
     "TotalRecords",
     "RecordsWithIP",
+    "ValidIPDataCoveragePercent",
     "UniqueIPs",
     "TopIPAddress",
     "TopIPRecords",
@@ -26,39 +61,39 @@ IP_ANALYSIS_COLUMNS = [
 
 def ip_concentration_score(coverage_percent: float) -> int:
     """Score top-IP concentration from 0 to 5."""
-    if coverage_percent < 5:
-        return 0
-    if coverage_percent < 10:
-        return 1
-    if coverage_percent < 20:
-        return 2
-    if coverage_percent < 30:
-        return 3
-    if coverage_percent < 50:
-        return 4
-    return 5
+    if coverage_percent < IP_CONCENTRATION_THRESHOLD_1:
+        return IP_CONCENTRATION_SCORE_1
+    if coverage_percent < IP_CONCENTRATION_THRESHOLD_2:
+        return IP_CONCENTRATION_SCORE_2
+    if coverage_percent < IP_CONCENTRATION_THRESHOLD_3:
+        return IP_CONCENTRATION_SCORE_3
+    if coverage_percent < IP_CONCENTRATION_THRESHOLD_4:
+        return IP_CONCENTRATION_SCORE_4
+    if coverage_percent < IP_CONCENTRATION_THRESHOLD_5:
+        return IP_CONCENTRATION_SCORE_5
+    return IP_CONCENTRATION_SCORE_6
 
 
 def ip_volume_score(top_ip_records: float) -> int:
     """Score top-IP volume from 0 to 5."""
-    if top_ip_records < 10:
-        return 0
-    if top_ip_records < 25:
-        return 1
-    if top_ip_records < 50:
-        return 2
-    if top_ip_records < 100:
-        return 3
-    if top_ip_records < 200:
-        return 4
-    return 5
+    if top_ip_records < IP_VOLUME_THRESHOLD_1:
+        return IP_VOLUME_SCORE_1
+    if top_ip_records < IP_VOLUME_THRESHOLD_2:
+        return IP_VOLUME_SCORE_2
+    if top_ip_records < IP_VOLUME_THRESHOLD_3:
+        return IP_VOLUME_SCORE_3
+    if top_ip_records < IP_VOLUME_THRESHOLD_4:
+        return IP_VOLUME_SCORE_4
+    if top_ip_records < IP_VOLUME_THRESHOLD_5:
+        return IP_VOLUME_SCORE_5
+    return IP_VOLUME_SCORE_6
 
 
 def ip_priority(score: int) -> str:
     """Convert IP score into a priority label."""
-    if score >= 8:
+    if score >= IP_PRIORITY_HIGH_MIN_SCORE:
         return "HIGH"
-    if score >= 5:
+    if score >= IP_PRIORITY_MEDIUM_MIN_SCORE:
         return "MEDIUM"
     return "LOW"
 
@@ -79,6 +114,9 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
             UniqueIPs=("ValidIPAddress", "nunique"),
         )
         .reset_index()
+    )
+    totals["ValidIPDataCoveragePercent"] = safe_percent(
+        totals["RecordsWithIP"], totals["TotalRecords"]
     )
 
     valid_ips = working.loc[working["ValidIPAddress"].notna()]
@@ -113,31 +151,44 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
     result["IPVolumeScore"] = 0
     result["IPScore"] = 0
 
-    eligible_sample = result["TotalRecords"] >= 100
-    result.loc[eligible_sample, "IPConcentrationScore"] = result.loc[
-        eligible_sample,
+    sufficient_ip_evidence = (
+        (result["RecordsWithIP"] >= MIN_VALID_IP_RECORDS)
+        & (
+            result["ValidIPDataCoveragePercent"]
+            >= MIN_VALID_IP_DATA_COVERAGE_PERCENT
+        )
+    )
+    result.loc[sufficient_ip_evidence, "IPConcentrationScore"] = result.loc[
+        sufficient_ip_evidence,
         "TopIPCoverageFromValidIPRecordsPercent",
     ].map(ip_concentration_score)
-    result.loc[eligible_sample, "IPVolumeScore"] = result.loc[
-        eligible_sample,
+    result.loc[sufficient_ip_evidence, "IPVolumeScore"] = result.loc[
+        sufficient_ip_evidence,
         "TopIPRecords",
     ].map(ip_volume_score)
     no_meaningful_concentration = (
-        eligible_sample
+        sufficient_ip_evidence
         & (
-            (result["IPConcentrationScore"] == 0)
-            | (result["TopIPCoverageFromValidIPRecordsPercent"] < 5)
+            (result["IPConcentrationScore"] == IP_CONCENTRATION_SCORE_1)
+            | (
+                result["TopIPCoverageFromValidIPRecordsPercent"]
+                < IP_MEANINGFUL_CONCENTRATION_PERCENT
+            )
         )
     )
 
-    scoreable_sample = eligible_sample & ~no_meaningful_concentration
+    scoreable_sample = sufficient_ip_evidence & ~no_meaningful_concentration
     result.loc[scoreable_sample, "IPScore"] = (
         result.loc[scoreable_sample, "IPConcentrationScore"]
         + result.loc[scoreable_sample, "IPVolumeScore"]
     )
     result["IPPriority"] = result["IPScore"].map(ip_priority)
 
-    result["IPScoreReason"] = "Moderate IP concentration"
+    result["IPScoreReason"] = "Insufficient IP evidence"
+    result.loc[
+        sufficient_ip_evidence,
+        "IPScoreReason",
+    ] = "Moderate IP concentration"
     result.loc[
         result["IPConcentrationScore"] >= 4,
         "IPScoreReason",
@@ -150,10 +201,6 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
         no_meaningful_concentration,
         "IPScoreReason",
     ] = "No meaningful IP concentration"
-    result.loc[
-        ~eligible_sample,
-        "IPScoreReason",
-    ] = "Insufficient sample size"
 
     result = normalize_count_columns(
         result,
