@@ -8,6 +8,10 @@ from pipeline_common import normalize_count_columns, safe_ratio
 
 
 WINDOW_MINUTES = 5
+MIN_PEAK_MINUTE_HITS_FOR_BURST_SCORING = 75
+
+BURST_EVIDENCE_INSUFFICIENT_REASON = "Peak volume below burst scoring threshold"
+BURST_EVIDENCE_SUFFICIENT_REASON = "Peak volume sufficient for burst scoring"
 
 TIME_ANALYSIS_COLUMNS = [
     "AdminComment",
@@ -19,6 +23,7 @@ TIME_ANALYSIS_COLUMNS = [
     "BurstScore",
     "PeakVolumeScore",
     "BurstScoreValue",
+    "BurstEvidenceReason",
     "TimeScore",
     "TimePriority",
 ]
@@ -142,8 +147,23 @@ def analyze(rows: pd.DataFrame) -> pd.DataFrame:
     result.loc[eligible_sample, "PeakVolumeScore"] = peak_hits.loc[
         eligible_sample
     ].map(peak_volume_score)
-    result.loc[eligible_sample, "BurstScoreValue"] = burst_scores.loc[
+
+    # Purpose:
+    # Prevent low-volume traffic from receiving BurstScore points when the burst
+    # ratio is mathematically high but the absolute traffic volume is
+    # insignificant. BurstScore is always calculated. BurstScoreValue is only
+    # awarded when PeakMinuteHits reaches the minimum evidence threshold.
+    burst_evidence_sample = (
         eligible_sample
+        & (peak_hits >= MIN_PEAK_MINUTE_HITS_FOR_BURST_SCORING)
+    )
+    result["BurstEvidenceReason"] = BURST_EVIDENCE_INSUFFICIENT_REASON
+    result.loc[
+        burst_evidence_sample,
+        "BurstEvidenceReason",
+    ] = BURST_EVIDENCE_SUFFICIENT_REASON
+    result.loc[burst_evidence_sample, "BurstScoreValue"] = burst_scores.loc[
+        burst_evidence_sample
     ].map(burst_score_value)
     result.loc[eligible_sample, "TimeScore"] = (
         result.loc[eligible_sample, "PeakVolumeScore"]
